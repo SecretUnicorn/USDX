@@ -101,7 +101,9 @@ uses
   ULuaParty,
   ULuaScreenSing,
   UTime,
-  UWebcam;
+  UWebcam,
+  UWebQueue,
+  UWebServer;
   //UVideoAcinerella;
 
 procedure Main;
@@ -200,12 +202,24 @@ begin
     // Lyrics-engine with media reference timer
     LyricsState := TLyricsState.Create();
 
+    // Song request queue, has to exist before the songs are loaded
+    Log.LogStatus('Web Queue', 'Initialization');
+    WebQueue := TWebQueue.Create;
+
     // Graphics
     Initialize3D(WindowTitle);
 
     // Playlist Manager
     Log.LogStatus('Playlist Manager', 'Initialization');
     PlaylistMan := TPlaylistManager.Create;
+
+    // Web server for song requests
+    WebServer := TWebServer.Create;
+    if WebQueueEnabled then
+    begin
+      Log.LogStatus('Web Queue Server', 'Initialization');
+      WebServer.Start(Ini.WebQueuePort);
+    end;
 
     // GoldenStarsTwinkleMod
     Log.LogStatus('Effect Manager', 'Initialization');
@@ -259,6 +273,10 @@ begin
     // TODO:
     // call an uninitialize routine for every initialize step
     // or at least use the corresponding Free methods
+
+    Log.LogStatus('Stopping Web Queue Server', 'Finalization');
+    FreeAndNil(WebServer);
+    FreeAndNil(WebQueue);
 
     Log.LogStatus('Closing DB file', 'Finalization');
     if (DataBase <> nil) then
@@ -520,6 +538,37 @@ begin
           // remap the "keypad enter" key to the "standard enter" key
           if (Event.key.keysym.sym = SDLK_KP_ENTER) then Event.key.keysym.sym := SDLK_RETURN;
 
+          // escape closes the QR code overlay instead of leaving the screen
+          // that is covered by it
+          if (Event.type_ = SDL_KEYDOWN) and WebQueueEnabled and Assigned(WebQueue) and
+             (Event.key.keysym.sym = SDLK_ESCAPE) and WebQueueQRCodeVisible then
+          begin
+            HideWebQueueQRCode;
+            Continue;
+          end;
+
+          // web song request queue, handled before the screens so the
+          // shortcuts work no matter where the game currently is
+          if (Event.type_ = SDL_KEYDOWN) and WebQueueEnabled and Assigned(WebQueue) and
+             ((SDL_GetModState and (KMOD_LCTRL or KMOD_RCTRL)) <> 0) then
+          begin
+            if (Event.key.keysym.sym = SDLK_N) then
+            begin
+              WebQueue.RequestStartNext;
+              Continue;
+            end
+            else if (Event.key.keysym.sym = SDLK_L) then
+            begin
+              ToggleWebQueueOverlay;
+              Continue;
+            end
+            else if (Event.key.keysym.sym = SDLK_Q) then
+            begin
+              ToggleWebQueueQRCode;
+              Continue;
+            end;
+          end;
+
           if not Assigned(Display.NextScreen) then
           begin //drop input when changing screens
             KeyCharUnicode:=0;
@@ -605,6 +654,10 @@ begin
       end;
     end; // case
   end; // while
+
+  // start a song that was requested through the web page
+  if Assigned(WebQueue) then
+    ProcessWebQueueRequest;
 
   if Display.NeedsCursorUpdate() then
   begin

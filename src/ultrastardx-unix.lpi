@@ -29,7 +29,7 @@
         <LaunchingApplication PathPlusParams="/usr/X11R6/bin/xterm -T 'Lazarus Run Output' -e $(LazarusDir)/tools/runwait.sh $(TargetCmdLine)"/>
       </local>
     </RunParams>
-    <Units Count="123">
+    <Units Count="126">
       <Unit0>
         <Filename Value="ultrastardx.dpr"/>
         <IsPartOfProject Value="True"/>
@@ -536,6 +536,18 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="UMenuWidget"/>
       </Unit125>
+      <Unit126>
+        <Filename Value="base/UWebQueue.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit126>
+      <Unit127>
+        <Filename Value="base/UWebServer.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit127>
+      <Unit128>
+        <Filename Value="base/UQRCode.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit128>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

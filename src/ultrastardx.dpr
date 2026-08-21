@@ -215,6 +215,9 @@ uses
   UPathUtils        in 'base\UPathUtils.pas',
   UNote             in 'base\UNote.pas',
   UBeatTimer        in 'base\UBeatTimer.pas',
+  UQRCode           in 'base\UQRCode.pas',
+  UWebQueue         in 'base\UWebQueue.pas',
+  UWebServer        in 'base\UWebServer.pas',
 
   UText             in 'base\UText.pas',
   UUnicodeUtils     in 'base\UUnicodeUtils.pas',

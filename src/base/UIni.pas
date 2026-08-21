@@ -226,6 +226,12 @@ type
       Joypad:         integer;
       Mouse:          integer;
 
+      // Web song request queue
+      WebQueue:        integer;    // local web server for song requests
+      WebQueueOverlay: integer;    // show the queue in-game
+      WebQueuePort:    integer;
+      WebQueueAddress: UTF8String; // host shown in-game, empty: detect it
+
       // WebCam
       WebCamID:         integer;
       WebcamResolution: integer;
@@ -459,6 +465,11 @@ const
 
   ISingTimebarMode:    array[0..2] of UTF8String = ('Current', 'Remaining', 'Total');
   IJukeboxTimebarMode: array[0..2] of UTF8String = ('Current', 'Remaining', 'Total');
+
+  // Web song request queue
+  IWebQueue:        array[0..1] of UTF8String = ('Off', 'On');
+  IWebQueueOverlay: array[0..1] of UTF8String = ('Off', 'On');
+  IWebQueuePortDefault = 8080;
 
   // Recording options
   IChannelPlayer: array[0..6] of UTF8String = ('Off', '1', '2', '3', '4', '5', '6');
@@ -1721,6 +1732,14 @@ begin
   // JukeboxTimebarMode
   JukeboxTimebarMode := ReadArrayIndex(IJukeboxTimebarMode, IniFile, 'Advanced', 'JukeboxTimebarMode', IGNORE_INDEX, 'Current');
 
+  // Web song request queue
+  WebQueue := ReadArrayIndex(IWebQueue, IniFile, 'WebQueue', 'Enabled', IGNORE_INDEX, 'Off');
+  WebQueueOverlay := ReadArrayIndex(IWebQueueOverlay, IniFile, 'WebQueue', 'Overlay', IGNORE_INDEX, 'On');
+  WebQueuePort := IniFile.ReadInteger('WebQueue', 'Port', IWebQueuePortDefault);
+  if (WebQueuePort < 1) or (WebQueuePort > 65535) then
+    WebQueuePort := IWebQueuePortDefault;
+  WebQueueAddress := Trim(IniFile.ReadString('WebQueue', 'Address', ''));
+
   // WebCam
   WebCamID := IniFile.ReadInteger('Webcam', 'ID', 0);
   WebCamResolution := ReadArrayIndex(IWebcamResolution, IniFile, 'Webcam', 'Resolution', IGNORE_INDEX, '320x240');
@@ -2028,6 +2047,12 @@ begin
 
     // JukeboxTimebarMode
     IniFile.WriteString('Advanced', 'JukeboxTimebarMode', IJukeboxTimebarMode[JukeboxTimebarMode]);
+
+    // Web song request queue
+    IniFile.WriteString('WebQueue', 'Enabled', IWebQueue[WebQueue]);
+    IniFile.WriteString('WebQueue', 'Overlay', IWebQueueOverlay[WebQueueOverlay]);
+    IniFile.WriteInteger('WebQueue', 'Port', WebQueuePort);
+    IniFile.WriteString('WebQueue', 'Address', WebQueueAddress);
 
     // Directories (add a template if section is missing)
     // Note: Value must be ' ' and not '', otherwise no key is generated on Linux

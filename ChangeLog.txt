@@ -1,3 +1,11 @@
+Unreleased
+-----------------------------
+- song requests from the local network: a built-in web server lets guests browse
+  the song collection and queue songs from their phone ([WebQueue] in config.ini).
+  The queue is shown in-game, Ctrl+N sings the next entry, Ctrl+L hides the overlay
+  and Ctrl+Q shows a QR code of the address for guests to scan
+
+
 Ultrastar Deluxe 1.3.2 Beta - 2016-08-05
 -----------------------------
 - 6 player support on one or split over two screens

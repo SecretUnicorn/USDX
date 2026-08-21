@@ -172,7 +172,8 @@ uses
   UPathUtils,
   UNote,
   UFilesystem,
-  UUnicodeUtils;
+  UUnicodeUtils,
+  UWebQueue;
 
 var
   LastLoadingEventPumpTicks: cardinal = 0;
@@ -898,6 +899,10 @@ begin
 
   // update number of categories
   CatCount := Order;
+
+  // keep the song list offered by the web queue in sync
+  if Assigned(WebQueue) then
+    WebQueue.RebuildSongIndex;
 end;
 
 procedure TCatSongs.ShowCategory(Index: integer);

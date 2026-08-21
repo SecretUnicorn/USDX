@@ -44,7 +44,7 @@
         <PackageName Value="LazUtils"/>
       </Item1>
     </RequiredPackages>
-    <Units Count="127">
+    <Units Count="130">
       <Unit0>
         <Filename Value="ultrastardx.dpr"/>
         <IsPartOfProject Value="True"/>
@@ -552,6 +552,18 @@
         <Filename Value="menu\UMenuWidget.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit129>
+      <Unit130>
+        <Filename Value="base/UWebQueue.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit130>
+      <Unit131>
+        <Filename Value="base/UWebServer.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit131>
+      <Unit132>
+        <Filename Value="base/UQRCode.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit132>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

@@ -176,7 +176,8 @@ uses
   UMain,
   UTime,
   ULanguage,
-  UPathUtils
+  UPathUtils,
+  UWebQueue
   {$IFDEF MSWINDOWS}
   ,Windows
   {$ENDIF}
@@ -482,6 +483,10 @@ begin
         end;
       end;
     end; // if
+
+    // web song request queue
+    if not BlackScreen then
+      DrawWebQueueOverlay;
 
     // Draw OSD only on first Screen if Debug Mode is enabled
     if ((Ini.Debug = 1) or (Params.Debug)) and (S = 1) then

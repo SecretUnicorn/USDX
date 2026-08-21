@@ -35,13 +35,50 @@ Currently, the following installation channels are offered:
 - When running in borderless fullscreen mode, the monitor it runs on can be configured by setting `Graphics.PositionX/Y` to an offset in pixels.
 - If installed via the flatpak package, the primary song folder is `~/.var/app/eu.usdx.UltraStarDeluxe/.ultrastardx/songs/` and the config.ini is located in `~/.var/app/eu.usdx.UltraStarDeluxe/.ultrastardx/` by default. To configure additional song directories, they first need to be made accessible to the flatpak app using the command: `flatpak override eu.usdx.UltraStarDeluxe --filesystem=/your/new/songfolder` - Afterwards, the directory can be added to the config.ini file as usual.
 
-### 4. Further documentation
+### 4. Song requests from the local network
+Guests can browse the song collection and queue songs from their phone while the
+game keeps running on the host machine.
+
+Enable it in your `config.ini`:
+```ini
+  [WebQueue]
+  Enabled=On
+  Port=8080
+  Overlay=On
+  Address=
+```
+On the next start the game opens a small web server on that port and shows the
+address to open (for example `http://192.168.1.20:8080`) in the queue overlay at
+the bottom left of the screen. Everyone on the same network can open that page,
+search the song list and add songs to the queue; entries can be reordered or
+removed from the page again.
+
+If the configured port is already taken by another program, the next free port
+is used and the overlay shows the address that actually works.
+
+`Address` overrides the address shown in the game and in the QR code, for
+machines that have several network interfaces or a nicer host name. It accepts a
+host (`karaoke.local`), a host with port (`karaoke.local:8080`) or a complete URL
+(`http://karaoke.local:8080`); without a port the one the server listens on is
+appended. Leave it empty to detect the address automatically.
+
+In the game:
+- `Ctrl+N` sings the next song of the queue. If a song is running it is stopped
+  first. The very first time it opens the player setup, because the sing screen
+  is built there - confirm the players once, then `Ctrl+N` starts songs directly.
+- `Ctrl+L` shows/hides the queue overlay. `Overlay=Off` hides it by default.
+- `Ctrl+Q` shows/hides a big QR code of the address for guests to scan.
+
+The server only serves the request page and its JSON endpoints, it never exposes
+files. It has no authentication, so only enable it on a network you trust.
+
+### 5. Further documentation
 The [wiki](https://github.com/UltraStar-Deluxe/USDX/wiki) contains more information on:
 * [Command-line parameters](https://github.com/UltraStar-Deluxe/USDX/wiki/Command-Line-Parameters)
 * [Controls](https://github.com/UltraStar-Deluxe/USDX/wiki/Controls)
 * [Customization](https://github.com/UltraStar-Deluxe/USDX/wiki/Customization)
 
-### 5. Compiling
+### 6. Compiling
 There are two main ways to compile the game:
 
 1. Lazarus IDE
@@ -51,7 +88,7 @@ The executable will be `game/ultrastardx[.exe]`.
 
 For extended information, dependencies, OS-specific notes and configure flags, see [COMPILING.md](COMPILING.md).
 
-### 6. Making a release
+### 7. Making a release
 See [RELEASING.md](RELEASING.md)
 
 Other useful documents for maintainers: [pipeline info](PIPELINE.md).
