@@ -16,6 +16,8 @@ artist/title/difficulty/player/score/date, so running it twice is harmless.
 """
 
 import argparse
+import io
+import json
 import os
 import shutil
 import sqlite3
@@ -51,6 +53,25 @@ def find_databases():
     return sorted(set(found), key=os.path.getmtime, reverse=True)
 
 
+def state_path(target):
+    return target + '.merged.json'
+
+
+def load_state(target):
+    """What was merged into this database before, per source and song."""
+    try:
+        with io.open(state_path(target), encoding='utf-8') as handle:
+            return json.load(handle)
+    except (IOError, ValueError):
+        return {}
+
+
+def score_columns(conn):
+    """2026.10 added TrackCount and TrackMask so duets score per track."""
+    names = [row[1] for row in conn.execute('PRAGMA table_info(us_scores)')]
+    return [name for name in ('TrackCount', 'TrackMask') if name in names]
+
+
 def clean(value):
     # versions up to 2026.4 stored the artist and title with the terminating
     # zero byte of the Pascal string, 2026.5 and later do not
@@ -61,10 +82,22 @@ def song_key(artist, title):
     return (clean(artist).lower(), clean(title).lower())
 
 
-def merge(target_conn, source_path, report):
+def merge(target_conn, source_path, report, state=None):
     source = sqlite3.connect('file:%s?mode=ro' % source_path, uri=True)
+    if (state is None):
+        state = {}
+    # TimesPlayed is a sum, not a set of rows, so remember what this source
+    # already contributed instead of adding it again on the next run
+    before = state.get(source_path, {})
+    now = {}
     try:
         cur = target_conn.cursor()
+
+        # carry the track columns over when both sides have them, so a duet
+        # score does not turn into a solo one
+        extra = [name for name in score_columns(source)
+                 if name in score_columns(target_conn)]
+        extra_select = ''.join(', ' + name for name in extra)
 
         # so the game finds these rows again, and so both spellings of a song
         # end up on the same row below
@@ -80,40 +113,50 @@ def merge(target_conn, source_path, report):
 
         scores = set()
         for row in cur.execute(
-                'SELECT s.Artist, s.Title, c.Difficulty, c.Player, c.Score, c.Date '
-                'FROM us_scores c JOIN us_songs s ON s.ID = c.SongID'):
-            scores.add(song_key(row[0], row[1]) + (row[2], clean(row[3]), row[4], row[5]))
+                'SELECT s.Artist, s.Title, c.Difficulty, c.Player, c.Score, c.Date' +
+                ''.join(', c.' + name for name in extra) +
+                ' FROM us_scores c JOIN us_songs s ON s.ID = c.SongID'):
+            scores.add(song_key(row[0], row[1]) +
+                       (row[2], clean(row[3]), row[4], row[5]) + tuple(row[6:]))
 
         for row in source.execute('SELECT ID, %s FROM us_songs' % ', '.join(SONG_COLUMNS)):
             source_id, artist, title, times_played = row[0], row[1], row[2], row[3]
             key = song_key(artist, title)
 
+            flat = '\t'.join(key)
+            now[flat] = times_played
+            delta = times_played - before.get(flat, 0)
+
             if key in songs:
-                cur.execute('UPDATE us_songs SET TimesPlayed = TimesPlayed + ? WHERE ID = ?',
-                            (times_played, songs[key]))
+                if (delta != 0):
+                    cur.execute('UPDATE us_songs SET TimesPlayed = max(0, TimesPlayed + ?) '
+                                'WHERE ID = ?', (delta, songs[key]))
                 # the display settings of the target win, fill in only what it lacks
                 for name, value in zip(SONG_COLUMNS[3:], row[4:]):
                     if value is not None:
                         cur.execute('UPDATE us_songs SET %s = ? WHERE ID = ? AND %s IS NULL'
                                     % (name, name), (value, songs[key]))
-                report['songs_updated'] += 1
+                if (delta != 0):
+                    report['songs_updated'] += 1
             else:
                 cur.execute('INSERT INTO us_songs (%s) VALUES (%s)'
                             % (', '.join(SONG_COLUMNS), ', '.join('?' * len(SONG_COLUMNS))),
-                            (clean(artist), clean(title)) + row[3:])
+                            (clean(artist), clean(title), max(0, delta)) + row[4:])
                 songs[key] = cur.lastrowid
                 report['songs_added'] += 1
 
-            for difficulty, player, score, date in source.execute(
-                    'SELECT Difficulty, Player, Score, Date FROM us_scores WHERE SongID = ?',
-                    (source_id,)):
-                entry = (difficulty, clean(player), score, date)
+            for score_row in source.execute(
+                    'SELECT Difficulty, Player, Score, Date' + extra_select +
+                    ' FROM us_scores WHERE SongID = ?', (source_id,)):
+                entry = (score_row[0], clean(score_row[1])) + tuple(score_row[2:])
                 if key + entry in scores:
                     report['scores_skipped'] += 1
                     continue
 
-                cur.execute('INSERT INTO us_scores (SongID, Difficulty, Player, Score, Date) '
-                            'VALUES (?, ?, ?, ?, ?)', (songs[key],) + entry)
+                cur.execute('INSERT INTO us_scores (SongID, Difficulty, Player, Score, Date%s) '
+                            'VALUES (%s)' % (''.join(', ' + name for name in extra),
+                                             ', '.join('?' * (5 + len(extra)))),
+                            (songs[key], entry[0], entry[1]) + tuple(entry[2:]))
                 scores.add(key + entry)
                 report['scores_added'] += 1
 
@@ -122,6 +165,7 @@ def merge(target_conn, source_path, report):
         if reset and reset[0]:
             cur.execute('UPDATE us_statistics_info SET ResetTime = ? '
                         'WHERE ResetTime IS NULL OR ResetTime > ?', (reset[0], reset[0]))
+        state[source_path] = now
     finally:
         source.close()
 
@@ -146,11 +190,12 @@ def run(target, sources, apply_changes):
         shutil.copy2(target, backup)
         print('backup : %s' % backup)
 
+    state = load_state(target)
     conn = sqlite3.connect(target)
     try:
         for source in sources:
             report = dict(songs_added=0, songs_updated=0, scores_added=0, scores_skipped=0)
-            merge(conn, source, report)
+            merge(conn, source, report, state)
             print('%-52s +%d scores (%d already there), +%d songs, %d songs updated'
                   % (os.path.basename(os.path.dirname(source)), report['scores_added'],
                      report['scores_skipped'], report['songs_added'], report['songs_updated']))
@@ -159,6 +204,8 @@ def run(target, sources, apply_changes):
                              '(SELECT COUNT(*) FROM us_scores)').fetchone()
         if apply_changes:
             conn.commit()
+            with io.open(state_path(target), 'w', encoding='utf-8') as handle:
+                handle.write(json.dumps(state, ensure_ascii=False, indent=1))
         else:
             conn.rollback()
     finally:
@@ -207,9 +254,16 @@ def self_test():
         ('Queen', 'Bohemian Rhapsody', 1, [(0, 'Nicklas', 9000, 70)])]})
 
     conn = sqlite3.connect(target)
+    state = {}
     report = dict(songs_added=0, songs_updated=0, scores_added=0, scores_skipped=0)
-    merge(conn, source, report)
+    merge(conn, source, report, state)
     conn.commit()
+
+    # a second run must change nothing
+    again = dict(songs_added=0, songs_updated=0, scores_added=0, scores_skipped=0)
+    merge(conn, source, again, state)
+    conn.commit()
+    assert again == dict(songs_added=0, songs_updated=0, scores_added=0, scores_skipped=3), again
 
     songs, scores = conn.execute('SELECT (SELECT COUNT(*) FROM us_songs), '
                                  '(SELECT COUNT(*) FROM us_scores)').fetchone()
