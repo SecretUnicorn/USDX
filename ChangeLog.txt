@@ -8,8 +8,9 @@ Unreleased
   covers as a list or grid, and the name field is kept across reloads
 - web song queue: songs with medley tags can be queued as a short version that
   sings only the tagged part
-- web song queue: the song list can be sorted by artist, title or year in either
-  direction, or shuffled into a random order that can be reshuffled
+- web song queue: the song list can be sorted by artist, title, year or how often
+  a song has been sung, in either direction, or shuffled into a random order that
+  can be reshuffled. Each entry shows how often it has been sung
 - tools/merge-score-dbs.py merges the high scores and statistics of the version
   specific settings directories into one database
 - microphone delay can be measured automatically in the game options: the game

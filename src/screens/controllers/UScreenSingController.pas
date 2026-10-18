@@ -214,6 +214,7 @@ uses
   USong,
   UUnicodeUtils,
   UWebcam,
+  UWebQueue,
   UWebSDK,
   Classes,
   Math;
@@ -1912,7 +1913,11 @@ begin
   end;
 
   if Sung then
+  begin
     DataBase.WriteScore(CurrentSong);
+    if Assigned(WebQueue) then
+      WebQueue.SongPlayed(CurrentSong.Artist, CurrentSong.Title);
+  end;
 end;
 
 procedure TScreenSingController.AutoSendScore;

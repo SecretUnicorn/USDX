@@ -145,6 +145,8 @@ type
       procedure AddMedia_Score (Song: TSong; WebID: integer; Receive_Media_Score: integer; Level: integer);
       procedure AddUser_Score (Song: TSong; WebID: integer; Receive_User_Score: string; Level: integer);
 
+      function GetTimesPlayed(Artist, Title: UTF8String): integer;
+
       function ReadMax_Score(Artist, Title: UTF8String; WebID, Level: integer): integer;
       function ReadMedia_Score(Artist, Title: UTF8String; WebID, Level: integer): integer;
       function ReadUser_Score(Artist, Title: UTF8String; WebID, Level: integer): string;
@@ -1134,6 +1136,29 @@ begin
 
   TableData.Free;
 
+end;
+
+(**
+ * Read Max_Score
+ *)
+(**
+ * How often a song has been sung, 0 if it is not in the score database yet.
+ *)
+function TDataBaseSystem.GetTimesPlayed(Artist, Title: UTF8String): integer;
+begin
+  Result := 0;
+
+  if not Assigned(ScoreDB) then
+    Exit;
+
+  try
+    Result := ScoreDB.GetTableValue(
+        'SELECT [TimesPlayed] FROM [' + cUS_Songs + '] ' +
+        'WHERE [Artist] = ? AND [Title] = ?',
+        [Artist, Title]);
+  except on E: Exception do
+    Log.LogError(E.Message, 'TDataBaseSystem.GetTimesPlayed');
+  end;
 end;
 
 (**

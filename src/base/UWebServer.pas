@@ -670,6 +670,7 @@ begin
       '","language":"' + JsonEscape(Songs[I].Language) +
       '","genre":"' + JsonEscape(Songs[I].Genre) +
       '","year":' + IntToStr(Songs[I].Year) +
+      ',"played":' + IntToStr(Songs[I].Played) +
       ',"duet":' + IfThen(Songs[I].IsDuet, 'true', 'false') +
       ',"short":' + IfThen(Songs[I].HasMedley, 'true', 'false') + '}';
   end;

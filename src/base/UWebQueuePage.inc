@@ -38,7 +38,9 @@ begin
     S.Add('.meta{flex:1;min-width:0;}');
     S.Add('.title{font-weight:600;display:flex;align-items:center;min-width:0;}');
     S.Add('.title .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}');
-    S.Add('.sub{color:var(--dim);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}');
+    S.Add('.sub{color:var(--dim);font-size:13px;display:flex;align-items:center;min-width:0;margin-top:2px;}');
+    S.Add('.sub .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}');
+    S.Add('.sub .count{flex:none;white-space:pre;}');
     S.Add('.pos{color:var(--accent);font-weight:700;min-width:22px;text-align:center;}');
     S.Add('button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:15px;cursor:pointer;}');
     S.Add('button:active{transform:scale(.96);}');
@@ -101,6 +103,7 @@ begin
     S.Add('<option value="artist">Artist</option>');
     S.Add('<option value="title">Song title</option>');
     S.Add('<option value="year">Year</option>');
+    S.Add('<option value="played">Times sung</option>');
     S.Add('<option value="random">Random</option>');
     S.Add('</select>');
     S.Add('<button id="sortdir"></button>');
@@ -113,7 +116,7 @@ begin
     S.Add('<div class="toast" id="toast"></div>');
     S.Add('<script>');
     S.Add('var PAGE=60;var offset=0;var total=0;var query="";var rev=-1;var timer=null;');
-    S.Add('var reqid=0;') ;
+    S.Add('var reqid=0;');
     S.Add('var elSongs=document.getElementById("songs");');
     S.Add('var elQueue=document.getElementById("queue");');
     S.Add('var elMore=document.getElementById("more");');
@@ -154,7 +157,10 @@ begin
     S.Add('if(s.duet){var d=document.createElement("span");d.className="tag";d.textContent="DUET";t.appendChild(d);}');
     S.Add('var sub=document.createElement("div");sub.className="sub";');
     S.Add('var bits=[s.artist];if(s.year){bits.push(s.year);}if(s.language){bits.push(s.language);}');
-    S.Add('sub.textContent=bits.join(" · ");');
+    S.Add('var sn=document.createElement("span");sn.className="t";sn.textContent=bits.join(" · ");');
+    S.Add('var cn=document.createElement("span");cn.className="count";');
+    S.Add('cn.textContent=" · "+(s.played?"sung "+s.played+"\u00d7":"never sung");');
+    S.Add('sub.appendChild(sn);sub.appendChild(cn);');
     S.Add('meta.appendChild(t);meta.appendChild(sub);');
     S.Add('var b=document.createElement("button");b.className="add";b.textContent="+";');
     S.Add('b.disabled=!hasName();');
@@ -191,7 +197,9 @@ begin
     S.Add('var tn=document.createElement("span");tn.className="t";tn.textContent=e.title;t.appendChild(tn);');
     S.Add('if(e.short){var st=document.createElement("span");st.className="tag";st.textContent="SHORT";t.appendChild(st);}');
     S.Add('var sub=document.createElement("div");sub.className="sub";');
-    S.Add('sub.textContent=e.singer?e.artist+" · "+e.singer:e.artist;');
+    S.Add('var qn=document.createElement("span");qn.className="t";');
+    S.Add('qn.textContent=e.singer?e.artist+" · "+e.singer:e.artist;');
+    S.Add('sub.appendChild(qn);');
     S.Add('meta.appendChild(t);meta.appendChild(sub);');
     S.Add('var up=document.createElement("button");up.className="icon";up.textContent="↑";');
     S.Add('up.setAttribute("aria-label","Move up");up.disabled=(i===0);');
@@ -240,6 +248,7 @@ begin
     S.Add('elSort.value=sort;');
     S.Add('elSortDir.textContent=sort==="random"?"\u21bb Reshuffle":');
     S.Add('(sort==="year"?(dir==="asc"?"\u2191 Old first":"\u2193 New first")');
+    S.Add(':sort==="played"?(dir==="asc"?"\u2191 Least first":"\u2193 Most first")');
     S.Add(':(dir==="asc"?"\u2191 A-Z":"\u2193 Z-A"));}');
     S.Add('elSort.onchange=function(){sort=elSort.value;');
     S.Add('try{localStorage.setItem("usdxSort",sort);}catch(e){}');

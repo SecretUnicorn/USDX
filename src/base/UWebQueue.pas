@@ -52,6 +52,7 @@ type
     Genre:      UTF8String;
     Edition:    UTF8String;
     Year:       integer;
+    Played:     integer;   // how often it has been sung, from the score database
     IsDuet:     boolean;
     HasMedley:  boolean;    // has medley in/out tags, so it can be sung short
     Path:       UTF8String; // full path of the txt file, used to find the song again
@@ -91,6 +92,7 @@ type
       {* Rebuilds the song snapshot the web server works on. Called by
          TCatSongs.Refresh, i.e. whenever the song list changed. *}
       procedure RebuildSongIndex;
+      procedure SongPlayed(const Artist, Title: UTF8String);
 
       // the following methods are safe to call from the web server thread
       function  SearchSongs(const Search: UTF8String; Offset, Limit: integer;
@@ -148,6 +150,7 @@ implementation
 uses
   Math,
   StrUtils,
+  UDataBase,
   UDisplay,
   UGraphic,
   UIni,
@@ -296,6 +299,26 @@ begin
     end;
 end;
 
+{* Called on the main thread when a song has been sung, so the counts on the
+   web page do not wait for the next rebuild of the index. *}
+procedure TWebQueue.SongPlayed(const Artist, Title: UTF8String);
+var
+  I: integer;
+begin
+  EnterCriticalSection(Lock);
+  try
+    for I := 0 to High(SongIndex) do
+      if (SongIndex[I].Artist = Artist) and (SongIndex[I].Title = Title) then
+      begin
+        Inc(SongIndex[I].Played);
+        Inc(fRevision);
+        Break;
+      end;
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+end;
+
 function TWebQueue.FindSongIndex(SongID: cardinal): integer;
 var
   I: integer;
@@ -353,6 +376,7 @@ begin
     NewIndex[Count].Genre      := CurSong.Genre;
     NewIndex[Count].Edition    := CurSong.Edition;
     NewIndex[Count].Year       := CurSong.Year;
+    NewIndex[Count].Played     := DataBase.GetTimesPlayed(CurSong.Artist, CurSong.Title);
     NewIndex[Count].IsDuet     := CurSong.isDuet;
     // only the explicit tags, a guessed refrain is not what the guest picked
     NewIndex[Count].HasMedley  := (CurSong.Medley.Source >= msTag);
@@ -392,6 +416,9 @@ begin
       Result := Format('%.5d', [Song.Year]);
     Result := Result + #1 + LowerCase(Song.Artist) + #1 + LowerCase(Song.Title);
   end
+  else if (Sort = 'played') then
+    Result := Format('%.5d', [Min(Song.Played, 99999)]) + #1 +
+              LowerCase(Song.Artist) + #1 + LowerCase(Song.Title)
   else if (Sort = 'random') then
     // derived from the seed, so the order stays put while the page asks for
     // further pages and only changes when it sends a new seed
