@@ -39,10 +39,11 @@ def find_databases():
     """The usual profile locations, newest modification first."""
     home = os.path.expanduser('~')
     patterns = [
-        os.path.join(home, 'Library', 'Application Support', 'UltraStarDeluxe*', 'Ultrastar.db'),
+        # the directory carried the version until 2026.10, "UltraStar Deluxe" since
+        os.path.join(home, 'Library', 'Application Support', 'UltraStar*Deluxe*', 'Ultrastar.db'),
         os.path.join(home, '.ultrastardx*', 'Ultrastar.db'),
         os.path.join(home, '.local', 'share', 'ultrastardx*', 'Ultrastar.db'),
-        os.path.join(os.environ.get('APPDATA', home), 'ultrastardx*', 'Ultrastar.db'),
+        os.path.join(os.environ.get('APPDATA', home), 'ultrastar*', 'Ultrastar.db'),
     ]
     found = []
     for pattern in patterns:
@@ -50,14 +51,28 @@ def find_databases():
     return sorted(set(found), key=os.path.getmtime, reverse=True)
 
 
+def clean(value):
+    # versions up to 2026.4 stored the artist and title with the terminating
+    # zero byte of the Pascal string, 2026.5 and later do not
+    return value.replace('\0', '').strip()
+
+
 def song_key(artist, title):
-    return (artist.strip().lower(), title.strip().lower())
+    return (clean(artist).lower(), clean(title).lower())
 
 
 def merge(target_conn, source_path, report):
     source = sqlite3.connect('file:%s?mode=ro' % source_path, uri=True)
     try:
         cur = target_conn.cursor()
+
+        # so the game finds these rows again, and so both spellings of a song
+        # end up on the same row below
+        cur.execute("UPDATE us_songs SET Artist = replace(Artist, char(0), ''), "
+                    "Title = replace(Title, char(0), '') "
+                    'WHERE instr(Artist, char(0)) > 0 OR instr(Title, char(0)) > 0')
+        cur.execute("UPDATE us_scores SET Player = replace(Player, char(0), '') "
+                    'WHERE instr(Player, char(0)) > 0')
 
         songs = {}
         for row in cur.execute('SELECT ID, Artist, Title FROM us_songs'):
@@ -67,7 +82,7 @@ def merge(target_conn, source_path, report):
         for row in cur.execute(
                 'SELECT s.Artist, s.Title, c.Difficulty, c.Player, c.Score, c.Date '
                 'FROM us_scores c JOIN us_songs s ON s.ID = c.SongID'):
-            scores.add(song_key(row[0], row[1]) + (row[2], row[3], row[4], row[5]))
+            scores.add(song_key(row[0], row[1]) + (row[2], clean(row[3]), row[4], row[5]))
 
         for row in source.execute('SELECT ID, %s FROM us_songs' % ', '.join(SONG_COLUMNS)):
             source_id, artist, title, times_played = row[0], row[1], row[2], row[3]
@@ -85,20 +100,21 @@ def merge(target_conn, source_path, report):
             else:
                 cur.execute('INSERT INTO us_songs (%s) VALUES (%s)'
                             % (', '.join(SONG_COLUMNS), ', '.join('?' * len(SONG_COLUMNS))),
-                            row[1:])
+                            (clean(artist), clean(title)) + row[3:])
                 songs[key] = cur.lastrowid
                 report['songs_added'] += 1
 
-            for score in source.execute(
+            for difficulty, player, score, date in source.execute(
                     'SELECT Difficulty, Player, Score, Date FROM us_scores WHERE SongID = ?',
                     (source_id,)):
-                if key + tuple(score) in scores:
+                entry = (difficulty, clean(player), score, date)
+                if key + entry in scores:
                     report['scores_skipped'] += 1
                     continue
 
                 cur.execute('INSERT INTO us_scores (SongID, Difficulty, Player, Score, Date) '
-                            'VALUES (?, ?, ?, ?, ?)', (songs[key],) + tuple(score))
-                scores.add(key + tuple(score))
+                            'VALUES (?, ?, ?, ?, ?)', (songs[key],) + entry)
+                scores.add(key + entry)
                 report['scores_added'] += 1
 
         # "statistics since" should cover the oldest data that is now in there
@@ -187,7 +203,7 @@ def self_test():
     # the same song in both, plus one score that exists in both
     build(target, {'reset': 200, 'songs': [('ABBA', 'Mamma Mia', 2, [(0, 'Nicklas', 8000, 50)])]})
     build(source, {'reset': 100, 'songs': [
-        ('abba', 'mamma mia', 3, [(0, 'Nicklas', 8000, 50), (1, 'Guest', 7000, 60)]),
+        ('abba\0', 'mamma mia\0', 3, [(0, 'Nicklas\0', 8000, 50), (1, 'Guest', 7000, 60)]),
         ('Queen', 'Bohemian Rhapsody', 1, [(0, 'Nicklas', 9000, 70)])]})
 
     conn = sqlite3.connect(target)
@@ -199,13 +215,18 @@ def self_test():
                                  '(SELECT COUNT(*) FROM us_scores)').fetchone()
     played = conn.execute("SELECT TimesPlayed FROM us_songs WHERE Artist = 'ABBA'").fetchone()[0]
     reset = conn.execute('SELECT ResetTime FROM us_statistics_info').fetchone()[0]
+    stored = conn.execute('SELECT COUNT(*) FROM us_songs WHERE instr(Artist, char(0)) > 0 '
+                          'OR instr(Title, char(0)) > 0').fetchone()[0]
+    stored += conn.execute('SELECT COUNT(*) FROM us_scores '
+                           'WHERE instr(Player, char(0)) > 0').fetchone()[0]
     conn.close()
     shutil.rmtree(tmp)
 
-    assert songs == 2, songs                       # ABBA matched case insensitively
+    assert songs == 2, songs                       # ABBA matched despite case and zero byte
     assert scores == 3, scores                     # the duplicate was not copied
     assert played == 5, played                     # 2 + 3
     assert reset == 100, reset                     # the older start wins
+    assert stored == 0, stored                     # nothing written with a zero byte
     assert report == dict(songs_added=1, songs_updated=1, scores_added=2, scores_skipped=1), report
     print('self test passed')
     return 0
