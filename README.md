@@ -106,18 +106,33 @@ measurement, and redo it whenever you change speakers. Repeated measurements can
 differ by up to about 50 ms because the capture buffer aligns differently each
 time; if the result looks off, run it again.
 
-### 6. Further documentation
+### 6. Merging the scores of older versions
+Every version keeps its own settings directory (`UltraStarDeluxe<version>` in
+your user data folder), high scores and statistics included, so after an update
+the statistics tab starts at zero again. `tools/merge-score-dbs.py` merges the
+databases of all installed versions into one:
+
+```
+python3 tools/merge-score-dbs.py           # list what would be merged
+python3 tools/merge-score-dbs.py --apply   # merge, after backing the target up
+```
+
+It merges into the most recently used database, matches songs by artist and
+title and skips scores that are already there, so start the new version once
+before running it, and running it twice does no harm.
+
+### 7. Further documentation
 The [documentation](https://usdx.eu/docs/) contains more information on:
 * [Command-line parameters](https://usdx.eu/docs/command-line-parameters/)
 * [Controls](https://usdx.eu/docs/controls/)
 * [Customization](https://usdx.eu/docs/customization/)
 
-### 7. Compiling
+### 8. Compiling
 The game has an Autotools-based buildsystem and can be compiled by running `./autogen.sh && ./configure [--enable-debug] && make`. The executable will be `game/ultrastardx[.exe]`.
 
 For extended information, dependencies, OS-specific notes and configure flags, see [COMPILING.md](COMPILING.md).
 
-### 8. Making a release
+### 9. Making a release
 See [RELEASING.md](RELEASING.md)
 
 Other useful documents for maintainers: [pipeline info](PIPELINE.md).

@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+"""Merge the score databases of several UltraStar Deluxe versions into one.
+
+Every version keeps its own profile directory ("UltraStarDeluxe2026.8.1",
+"UltraStarDeluxe2026.10.0+dev", ...), each with its own Ultrastar.db, so the
+statistics and high scores of older versions stay invisible after an update.
+This merges them into one database.
+
+    python3 tools/merge-score-dbs.py                 # show what would happen
+    python3 tools/merge-score-dbs.py --apply         # do it (backs up first)
+    python3 tools/merge-score-dbs.py --target <db> --source <db> [...] --apply
+    python3 tools/merge-score-dbs.py --self-test
+
+Songs are matched by artist and title, scores are deduplicated on
+artist/title/difficulty/player/score/date, so running it twice is harmless.
+"""
+
+import argparse
+import os
+import shutil
+import sqlite3
+import sys
+import time
+from glob import glob
+
+# us_webs, us_webs_stats and us_users_info belong to the score upload feature
+# and are empty in practice.
+# shortcut: those three tables are not merged, revisit if anyone ever uses the
+# web score upload.
+SONG_COLUMNS = [
+    'Artist', 'Title', 'TimesPlayed', 'Rating', 'VideoRatioAspect',
+    'VideoWidth', 'VideoHeight', 'LyricPosition', 'LyricAlpha',
+    'LyricSingFillColor', 'LyricActualFillColor', 'LyricNextFillColor',
+    'LyricSingOutlineColor', 'LyricActualOutlineColor', 'LyricNextOutlineColor',
+]
+
+
+def find_databases():
+    """The usual profile locations, newest modification first."""
+    home = os.path.expanduser('~')
+    patterns = [
+        os.path.join(home, 'Library', 'Application Support', 'UltraStarDeluxe*', 'Ultrastar.db'),
+        os.path.join(home, '.ultrastardx*', 'Ultrastar.db'),
+        os.path.join(home, '.local', 'share', 'ultrastardx*', 'Ultrastar.db'),
+        os.path.join(os.environ.get('APPDATA', home), 'ultrastardx*', 'Ultrastar.db'),
+    ]
+    found = []
+    for pattern in patterns:
+        found.extend(glob(pattern))
+    return sorted(set(found), key=os.path.getmtime, reverse=True)
+
+
+def song_key(artist, title):
+    return (artist.strip().lower(), title.strip().lower())
+
+
+def merge(target_conn, source_path, report):
+    source = sqlite3.connect('file:%s?mode=ro' % source_path, uri=True)
+    try:
+        cur = target_conn.cursor()
+
+        songs = {}
+        for row in cur.execute('SELECT ID, Artist, Title FROM us_songs'):
+            songs[song_key(row[1], row[2])] = row[0]
+
+        scores = set()
+        for row in cur.execute(
+                'SELECT s.Artist, s.Title, c.Difficulty, c.Player, c.Score, c.Date '
+                'FROM us_scores c JOIN us_songs s ON s.ID = c.SongID'):
+            scores.add(song_key(row[0], row[1]) + (row[2], row[3], row[4], row[5]))
+
+        for row in source.execute('SELECT ID, %s FROM us_songs' % ', '.join(SONG_COLUMNS)):
+            source_id, artist, title, times_played = row[0], row[1], row[2], row[3]
+            key = song_key(artist, title)
+
+            if key in songs:
+                cur.execute('UPDATE us_songs SET TimesPlayed = TimesPlayed + ? WHERE ID = ?',
+                            (times_played, songs[key]))
+                # the display settings of the target win, fill in only what it lacks
+                for name, value in zip(SONG_COLUMNS[3:], row[4:]):
+                    if value is not None:
+                        cur.execute('UPDATE us_songs SET %s = ? WHERE ID = ? AND %s IS NULL'
+                                    % (name, name), (value, songs[key]))
+                report['songs_updated'] += 1
+            else:
+                cur.execute('INSERT INTO us_songs (%s) VALUES (%s)'
+                            % (', '.join(SONG_COLUMNS), ', '.join('?' * len(SONG_COLUMNS))),
+                            row[1:])
+                songs[key] = cur.lastrowid
+                report['songs_added'] += 1
+
+            for score in source.execute(
+                    'SELECT Difficulty, Player, Score, Date FROM us_scores WHERE SongID = ?',
+                    (source_id,)):
+                if key + tuple(score) in scores:
+                    report['scores_skipped'] += 1
+                    continue
+
+                cur.execute('INSERT INTO us_scores (SongID, Difficulty, Player, Score, Date) '
+                            'VALUES (?, ?, ?, ?, ?)', (songs[key],) + tuple(score))
+                scores.add(key + tuple(score))
+                report['scores_added'] += 1
+
+        # "statistics since" should cover the oldest data that is now in there
+        reset = source.execute('SELECT ResetTime FROM us_statistics_info').fetchone()
+        if reset and reset[0]:
+            cur.execute('UPDATE us_statistics_info SET ResetTime = ? '
+                        'WHERE ResetTime IS NULL OR ResetTime > ?', (reset[0], reset[0]))
+    finally:
+        source.close()
+
+
+def totals(path):
+    conn = sqlite3.connect('file:%s?mode=ro' % path, uri=True)
+    try:
+        return conn.execute('SELECT (SELECT COUNT(*) FROM us_songs), '
+                            '(SELECT COUNT(*) FROM us_scores)').fetchone()
+    finally:
+        conn.close()
+
+
+def run(target, sources, apply_changes):
+    print('target : %s  (%d songs, %d scores)' % ((target,) + totals(target)))
+    for source in sources:
+        print('source : %s  (%d songs, %d scores)' % ((source,) + totals(source)))
+    print()
+
+    if apply_changes:
+        backup = '%s.bak-%s' % (target, time.strftime('%Y%m%d-%H%M%S'))
+        shutil.copy2(target, backup)
+        print('backup : %s' % backup)
+
+    conn = sqlite3.connect(target)
+    try:
+        for source in sources:
+            report = dict(songs_added=0, songs_updated=0, scores_added=0, scores_skipped=0)
+            merge(conn, source, report)
+            print('%-52s +%d scores (%d already there), +%d songs, %d songs updated'
+                  % (os.path.basename(os.path.dirname(source)), report['scores_added'],
+                     report['scores_skipped'], report['songs_added'], report['songs_updated']))
+
+        after = conn.execute('SELECT (SELECT COUNT(*) FROM us_songs), '
+                             '(SELECT COUNT(*) FROM us_scores)').fetchone()
+        if apply_changes:
+            conn.commit()
+        else:
+            conn.rollback()
+    finally:
+        conn.close()
+
+    print()
+    print('result : %d songs, %d scores%s' % (after[0], after[1],
+                                              '' if apply_changes else '  (nothing written, '
+                                              'pass --apply to keep it)'))
+    return 0
+
+
+def self_test():
+    import tempfile
+
+    def build(path, songs):
+        conn = sqlite3.connect(path)
+        conn.execute('CREATE TABLE [us_songs] ([ID] INTEGER PRIMARY KEY, [Artist] TEXT NOT NULL, '
+                     '[Title] TEXT NOT NULL, [TimesPlayed] INTEGER NOT NULL, [Rating] INTEGER NULL, '
+                     '[VideoRatioAspect] INTEGER NULL, [VideoWidth] INTEGER NULL, '
+                     '[VideoHeight] INTEGER NULL, [LyricPosition] INTEGER NULL, '
+                     '[LyricAlpha] INTEGER NULL, [LyricSingFillColor] TEXT NULL, '
+                     '[LyricActualFillColor] TEXT NULL, [LyricNextFillColor] TEXT NULL, '
+                     '[LyricSingOutlineColor] TEXT NULL, [LyricActualOutlineColor] TEXT NULL, '
+                     '[LyricNextOutlineColor] TEXT NULL)')
+        conn.execute('CREATE TABLE [us_scores] ([SongID] INTEGER NOT NULL, '
+                     '[Difficulty] INTEGER NOT NULL, [Player] TEXT NOT NULL, '
+                     '[Score] INTEGER NOT NULL, [Date] INTEGER NULL)')
+        conn.execute('CREATE TABLE [us_statistics_info] ([ResetTime] INTEGER)')
+        conn.execute('INSERT INTO us_statistics_info VALUES (?)', (songs.pop('reset'),))
+        for song_id, (artist, title, played, score_rows) in enumerate(songs['songs'], start=1):
+            conn.execute('INSERT INTO us_songs (ID, Artist, Title, TimesPlayed) VALUES (?,?,?,?)',
+                         (song_id, artist, title, played))
+            for row in score_rows:
+                conn.execute('INSERT INTO us_scores VALUES (?,?,?,?,?)', (song_id,) + row)
+        conn.commit()
+        conn.close()
+
+    tmp = tempfile.mkdtemp()
+    target = os.path.join(tmp, 'target.db')
+    source = os.path.join(tmp, 'source.db')
+    # the same song in both, plus one score that exists in both
+    build(target, {'reset': 200, 'songs': [('ABBA', 'Mamma Mia', 2, [(0, 'Nicklas', 8000, 50)])]})
+    build(source, {'reset': 100, 'songs': [
+        ('abba', 'mamma mia', 3, [(0, 'Nicklas', 8000, 50), (1, 'Guest', 7000, 60)]),
+        ('Queen', 'Bohemian Rhapsody', 1, [(0, 'Nicklas', 9000, 70)])]})
+
+    conn = sqlite3.connect(target)
+    report = dict(songs_added=0, songs_updated=0, scores_added=0, scores_skipped=0)
+    merge(conn, source, report)
+    conn.commit()
+
+    songs, scores = conn.execute('SELECT (SELECT COUNT(*) FROM us_songs), '
+                                 '(SELECT COUNT(*) FROM us_scores)').fetchone()
+    played = conn.execute("SELECT TimesPlayed FROM us_songs WHERE Artist = 'ABBA'").fetchone()[0]
+    reset = conn.execute('SELECT ResetTime FROM us_statistics_info').fetchone()[0]
+    conn.close()
+    shutil.rmtree(tmp)
+
+    assert songs == 2, songs                       # ABBA matched case insensitively
+    assert scores == 3, scores                     # the duplicate was not copied
+    assert played == 5, played                     # 2 + 3
+    assert reset == 100, reset                     # the older start wins
+    assert report == dict(songs_added=1, songs_updated=1, scores_added=2, scores_skipped=1), report
+    print('self test passed')
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--target', help='database to merge into (default: the newest one found)')
+    parser.add_argument('--source', action='append', default=[],
+                        help='database to merge from, repeatable (default: all others found)')
+    parser.add_argument('--apply', action='store_true', help='write the changes')
+    parser.add_argument('--self-test', action='store_true', help='check the merge logic and exit')
+    args = parser.parse_args()
+
+    if args.self_test:
+        return self_test()
+
+    found = find_databases()
+    target = args.target or (found[0] if found else None)
+    if not target:
+        print('No Ultrastar.db found, pass --target.', file=sys.stderr)
+        return 1
+
+    sources = args.source or [db for db in found if os.path.abspath(db) != os.path.abspath(target)]
+    if not sources:
+        print('Nothing to merge into %s.' % target, file=sys.stderr)
+        return 1
+
+    return run(target, sources, args.apply)
+
+
+if __name__ == '__main__':
+    sys.exit(main())
