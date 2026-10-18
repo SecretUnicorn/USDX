@@ -56,6 +56,23 @@ type
       AVDelaySelectNum:  integer;
       MicDelaySelectNum: integer;
 
+      // microphone delay calibration, see StartCalibration
+      CalPhase:     integer;
+      CalRound:     integer;
+      CalStart:     cardinal;
+      CalNoise:     single;
+      CalThreshold: single;
+      CalPlayers:   integer;
+      CalCapturing: boolean;
+      CalResults:   array of integer;
+      CalMessage:   UTF8String;
+
+      procedure StartCalibration;
+      procedure NextCalibrationRound;
+      procedure StopCalibration(const Message: UTF8String);
+      procedure UpdateCalibration;
+      procedure DrawCalibration;
+
       procedure Leave;
       procedure ReloadCurrentScreen;
       procedure ReloadAllScreens;
@@ -68,20 +85,32 @@ type
     public
       constructor Create; override;
       function ParseInput(PressedKey: cardinal; CharCode: UCS4Char; PressedDown: boolean): boolean; override;
+      function Draw: boolean; override;
       procedure OnShow; override;
   end;
 
 const
   ID='ID_071';   //for help system
 
+  CalibrationRounds    = 5;    // median over this many clicks
+  CalibrationNoiseMs   = 500;  // listen to the room before the first click
+  CalibrationPauseMs   = 450;  // silence between two clicks
+  CalibrationTimeoutMs = 1500;
+  CalibrationHeadroom  = 0.10; // how far above the room noise counts as the click
+
 implementation
 
 uses
+  StrUtils,
   UConfig,
   UGraphic,
   UHelp,
   ULanguage,
   ULog,
+  UNote,
+  URecord,
+  URenderer,
+  UText,
   UUnicodeUtils,
   SysUtils;
 
@@ -112,13 +141,26 @@ begin
           Result := false;
           Exit;
         end;
+      SDLK_C:
+        begin
+          if (CalPhase = 0) then
+            StartCalibration
+          else
+            StopCalibration('');
+          Exit;
+        end;
     end;
 
     // check special keys
     case PressedKey of
       SDLK_ESCAPE,
       SDLK_BACKSPACE :
-          Leave;
+        begin
+          if (CalPhase <> 0) then
+            StopCalibration('')
+          else
+            Leave;
+        end;
       SDLK_TAB:
         begin
           ScreenPopupHelp.ShowPopup();
@@ -219,6 +261,211 @@ begin
   end;
 end;
 
+{**
+ * Measures how long the sound of the game needs to come back through the
+ * microphone: it plays a short click and waits for the microphone to hear it.
+ * The round trip covers the output buffer, a bluetooth or airplay speaker and
+ * the microphone, which is what the mic delay has to compensate.
+ *
+ * The median of several rounds is used, a single round is easily spoiled by a
+ * door falling shut.
+ *}
+procedure TScreenOptionsGame.StartCalibration;
+begin
+  CalMessage := '';
+
+  if (AudioInputProcessor.CheckPlayersConfig(1) <> 0) then
+  begin
+    CalMessage := Language.Translate('RECORD_CALIBRATE_NO_DEVICE');
+    Exit;
+  end;
+
+  // the capture is wired up per player, borrow player one for the measurement
+  CalPlayers := PlayersPlay;
+  PlayersPlay := 1;
+  AudioInput.CaptureStart;
+  CalCapturing := true;
+
+  SetLength(CalResults, 0);
+  CalRound := 0;
+  CalNoise := 0;
+  CalStart := SDL_GetTicks;
+  CalPhase := 1; // listen to the room first
+end;
+
+procedure TScreenOptionsGame.NextCalibrationRound;
+begin
+  Inc(CalRound);
+
+  // drop what is still in the analysis window, otherwise the previous click
+  // triggers the next round right away
+  AudioInputProcessor.Sound[0].Clear();
+
+  AudioPlayback.PlaySound(SoundLib.Click);
+  CalStart := SDL_GetTicks;
+  CalPhase := 2;
+end;
+
+procedure TScreenOptionsGame.StopCalibration(const Message: UTF8String);
+begin
+  if CalCapturing then
+  begin
+    AudioInput.CaptureStop;
+    PlayersPlay := CalPlayers;
+    CalCapturing := false;
+  end;
+
+  CalPhase   := 0;
+  CalMessage := Message;
+end;
+
+procedure TScreenOptionsGame.UpdateCalibration;
+var
+  Now, Elapsed: cardinal;
+  Level: single;
+  I, J, Swap: integer;
+  Line: UTF8String;
+begin
+  if (CalPhase = 0) then
+    Exit;
+
+  Now   := SDL_GetTicks;
+  Level := AudioInputProcessor.Sound[0].MaxSampleVolume();
+
+  case CalPhase of
+    1: // how loud is the room on its own
+      begin
+        if (Level > CalNoise) then
+          CalNoise := Level;
+
+        if (Now - CalStart >= CalibrationNoiseMs) then
+        begin
+          CalThreshold := CalNoise + CalibrationHeadroom;
+          if (CalThreshold > 0.8) then
+          begin
+            StopCalibration(Language.Translate('RECORD_CALIBRATE_TOO_LOUD'));
+            Exit;
+          end;
+          NextCalibrationRound;
+        end;
+      end;
+
+    2: // waiting for the click to come back
+      begin
+        Elapsed := Now - CalStart;
+
+        if (Level >= CalThreshold) then
+        begin
+          SetLength(CalResults, Length(CalResults) + 1);
+          CalResults[High(CalResults)] := Elapsed;
+          CalStart := Now;
+          CalPhase := 3;
+        end
+        else if (Elapsed > CalibrationTimeoutMs) then
+          StopCalibration(Language.Translate('RECORD_CALIBRATE_NOT_HEARD'));
+      end;
+
+    3: // let the room go quiet again
+      begin
+        if (Now - CalStart < CalibrationPauseMs) then
+          Exit;
+
+        if (CalRound < CalibrationRounds) then
+        begin
+          NextCalibrationRound;
+          Exit;
+        end;
+
+        for I := 0 to High(CalResults) - 1 do
+          for J := 0 to High(CalResults) - I - 1 do
+            if (CalResults[J] > CalResults[J+1]) then
+            begin
+              Swap := CalResults[J];
+              CalResults[J] := CalResults[J+1];
+              CalResults[J+1] := Swap;
+            end;
+
+        Line := '';
+        for J := 0 to High(CalResults) do
+          Line := Line + IfThen(J > 0, ', ', '') + IntToStr(CalResults[J]);
+
+        // median, rounded to the 10ms steps the setting uses
+        I := Round(CalResults[Length(CalResults) div 2] / 10) * 10;
+
+        Ini.MicDelay := I;
+
+        // the update path of CalculateSelectSlide reads the value back out of
+        // the widget, so rebuild the option window from the new value instead
+        CalculateSelectSlide(true, @GetMicDelayOptText, Ini.MicDelay, MicDelayOptInt, IMicDelay);
+        UpdateSelectSlideOptions(MicDelaySelectNum, IMicDelay, MicDelayOptInt);
+
+        Log.LogStatus(Format('Microphone delay measured as %d ms (rounds sorted: %s, noise %.2f, threshold %.2f)',
+                             [I, Line, CalNoise, CalThreshold]),
+                      'TScreenOptionsGame.UpdateCalibration');
+
+        StopCalibration(Format(Language.Translate('RECORD_CALIBRATE_RESULT'), [I]));
+      end;
+  end;
+end;
+
+procedure TScreenOptionsGame.DrawCalibration;
+var
+  Line: UTF8String;
+  X, Y, W: real;
+begin
+  if (MicDelaySelectNum < 0) or (MicDelaySelectNum > High(SelectsS)) then
+    Exit;
+
+  // sit right under the mic delay setting this is about
+  X := SelectsS[MicDelaySelectNum].Texture.X;
+  Y := SelectsS[MicDelaySelectNum].Texture.Y + SelectsS[MicDelaySelectNum].Texture.H + 1;
+  W := SelectsS[MicDelaySelectNum].TextureSBG.X
+     + SelectsS[MicDelaySelectNum].TextureSBG.W - X;
+
+  Renderer.DepthTest := false;
+
+  SetFontFamily(0);
+  SetFontStyle(ftRegular);
+  SetFontItalic(false);
+  SetFontReflection(false, 0);
+  SetFontSize(14);
+
+  if (CalPhase = 0) and (CalMessage = '') then
+  begin
+    SetFontColor(0.75, 0.75, 0.75, 1);
+    SetFontPos(X + 4, Y);
+    PrintText(Language.Translate('RECORD_CALIBRATE_HINT'));
+    Renderer.DepthTest := true;
+    Exit;
+  end;
+
+  Renderer.DrawQuad(X, Y - 1, 0, W, 22, 0, 0, 0, 0.8);
+
+  case CalPhase of
+    1: Line := Language.Translate('RECORD_CALIBRATE_QUIET');
+    2, 3: Line := Format(Language.Translate('RECORD_CALIBRATE_RUNNING'),
+                         [CalRound, CalibrationRounds]);
+    else Line := CalMessage;
+  end;
+
+  if (CalPhase = 0) then
+    SetFontColor(0.6, 1, 0.7, 1)
+  else
+    SetFontColor(1, 0.82, 0.2, 1);
+
+  SetFontPos(X + 4, Y);
+  PrintText(Line);
+
+  Renderer.DepthTest := true;
+end;
+
+function TScreenOptionsGame.Draw: boolean;
+begin
+  UpdateCalibration;
+  Result := inherited Draw;
+  DrawCalibration;
+end;
+
 procedure TScreenOptionsGame.UpdateCalculatedSelectSlides(Init: boolean);
 begin
   CalculateSelectSlide(Init, @GetAVDelayOptText, Ini.AVDelay, AVDelayOptInt, IAVDelay);
@@ -261,6 +508,8 @@ end;
 
 procedure TScreenOptionsGame.Leave;
 begin
+  StopCalibration('');
+
   Ini.Save;
   ReloadAllScreens;
   ReloadSongMenu;

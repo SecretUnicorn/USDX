@@ -86,18 +86,27 @@ the address: Chrome's "Always use secure connections" turns a typed IP into an
 `https://` address, which this server does not speak. The QR code contains the
 full `http://` address and is not affected.
 
-### 5. Further documentation
+### 5. Measuring the microphone delay
+Wireless speakers add a lot of delay, which makes singing score badly because
+the game hears the music later than it plays it. In *Options -> Game*, `C` plays
+five short clicks and measures how long each one takes to come back through the
+microphone of player 1. The median of the five is written to *Microphone Delay*.
+
+Put the microphone where it will be sung into, keep the room quiet during the
+measurement, and redo it whenever you change speakers.
+
+### 6. Further documentation
 The [documentation](https://usdx.eu/docs/) contains more information on:
 * [Command-line parameters](https://usdx.eu/docs/command-line-parameters/)
 * [Controls](https://usdx.eu/docs/controls/)
 * [Customization](https://usdx.eu/docs/customization/)
 
-### 6. Compiling
+### 7. Compiling
 The game has an Autotools-based buildsystem and can be compiled by running `./autogen.sh && ./configure [--enable-debug] && make`. The executable will be `game/ultrastardx[.exe]`.
 
 For extended information, dependencies, OS-specific notes and configure flags, see [COMPILING.md](COMPILING.md).
 
-### 7. Making a release
+### 8. Making a release
 See [RELEASING.md](RELEASING.md)
 
 Other useful documents for maintainers: [pipeline info](PIPELINE.md).
