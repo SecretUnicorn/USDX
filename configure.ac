@@ -218,6 +218,18 @@ else
 # find sdl2
 PKG_HAVE([sdl2], [sdl2], yes)
 
+# Support sdl2-compat on Mac
+if [[ x$FPC_PLATFORM == xdarwin ]]; then
+    SDL2_PC_PATH=$(pkg-config --path sdl2)
+    if [[ -L "$SDL2_PC_PATH" -a $(basename $(readlink -f "$SDL2_PC_PATH")) == sdl2-compat.pc ]]; then
+        SDL3_LIBDIR=$(pkg-config --variable=libdir sdl3)
+        if [[ $? != 0 ]]; then
+            AC_MSG_ERROR([Detected sdl2-compat, but failed to locate SDL3])
+        fi
+        AC_SUBST(EXTRA_DYLIBS, $SDL3_LIBDIR/libSDL3.dylib)
+    fi
+fi
+
 # find SDL2_image
 PKG_HAVE([sdl2_image], [SDL2_image], yes)
 
@@ -344,9 +356,6 @@ libprojectM_PKG="projectM-4 >= 4.0"
 PKG_HAVE([libprojectM], [$libprojectM_PKG], no)
 AC_SUBST_DEFINE(HAVE_PROJECTM, $libprojectM_HAVE)
 PKG_VERSION([libprojectM], [$libprojectM_PKG])
-# get projectM include-dir
-PKG_VALUE([libprojectM], [INCLUDEDIR], [variable=includedir], [$libprojectM_PKG], 
-          [C-Header include-dir (e.g. /usr/include)])
 
 opencv_core_standalone=no
 opencv_imgproc_standalone=no
@@ -503,7 +512,7 @@ AC_SUBST(PFLAGS_EXTRA)
 
 # determine linker-flags
 if test x$FPC_PLATFORM = xdarwin; then
-    LDFLAGS="-macos_version_min 10.8 -undefined dynamic_lookup -headerpad_max_install_names"
+    LDFLAGS="-macos_version_min 10.8 -headerpad_max_install_names"
 fi
 #LIBS=
 AC_SUBST(LDFLAGS)

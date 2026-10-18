@@ -72,19 +72,19 @@ In the game:
 The server only serves the request page and its JSON endpoints, it never exposes
 files. It has no authentication, so only enable it on a network you trust.
 
+If a phone refuses to open the address, let it scan the QR code instead of typing
+the address: Chrome's "Always use secure connections" turns a typed IP into an
+`https://` address, which this server does not speak. The QR code contains the
+full `http://` address and is not affected.
+
 ### 5. Further documentation
-The [wiki](https://github.com/UltraStar-Deluxe/USDX/wiki) contains more information on:
-* [Command-line parameters](https://github.com/UltraStar-Deluxe/USDX/wiki/Command-Line-Parameters)
-* [Controls](https://github.com/UltraStar-Deluxe/USDX/wiki/Controls)
-* [Customization](https://github.com/UltraStar-Deluxe/USDX/wiki/Customization)
+The [documentation](https://usdx.eu/docs/) contains more information on:
+* [Command-line parameters](https://usdx.eu/docs/command-line-parameters/)
+* [Controls](https://usdx.eu/docs/controls/)
+* [Customization](https://usdx.eu/docs/customization/)
 
 ### 6. Compiling
-There are two main ways to compile the game:
-
-1. Lazarus IDE
-2. `./autogen.sh && ./configure [--enable-debug] && make`
-
-The executable will be `game/ultrastardx[.exe]`.
+The game has an Autotools-based buildsystem and can be compiled by running `./autogen.sh && ./configure [--enable-debug] && make`. The executable will be `game/ultrastardx[.exe]`.
 
 For extended information, dependencies, OS-specific notes and configure flags, see [COMPILING.md](COMPILING.md).
 

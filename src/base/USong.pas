@@ -85,6 +85,8 @@ type
 
   TScore = record
     Name:       UTF8String;
+    TrackCount: integer;
+    TrackMask:  integer;
     Score:      integer;
     Date:       UTF8String;
   end;
@@ -390,6 +392,9 @@ begin
   Self.Vocals   := PATH_NONE();
   Self.Background:= PATH_NONE();
   Self.Video    := PATH_NONE();
+
+  // create default version
+  Self.FormatVersion := TVersion.Create();
 end;
 
 // This may be changed, when we rewrite song select code.
@@ -444,6 +449,7 @@ begin
   Self.Path     := aFileName.GetPath;
   Self.FileName := aFileName.GetName;
   Self.Folder   := GetFolderCategory(aFileName);
+  Self.FormatVersion := TVersion.Create();
 
   (*
   if (aFileName.IsFile) then
@@ -1113,6 +1119,7 @@ begin
     begin
       RemoveTagsFromTagMap('VERSION');
       try
+	    FreeAndNil(self.FormatVersion); // free default version before assigning version from file
         self.FormatVersion := TVersion.Create(Value);
       except
         on E: Exception do
@@ -1128,9 +1135,7 @@ begin
         Log.LogError('Unsupported format version ' + self.FormatVersion.VersionString + '; Maximum supported version is 1.X.X: ' + FullFileName);
         Exit;
       end;
-    end
-    else
-      self.FormatVersion := TVersion.Create; //Default legacy version 0.3.0
+    end;
 
     // For Version >=1.0.0 Encoding is always UTF-8
     // For Version <1.0.0 read Encoding from ENCODING header

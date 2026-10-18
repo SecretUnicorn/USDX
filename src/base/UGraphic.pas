@@ -68,7 +68,7 @@ uses
   UScreenJukeboxOptions,
   UScreenJukeboxPlaylist,
   UScreenScore,
-  UScreenTop5,
+  UScreenHighScores,
   UScreenEditSub,
   UScreenEdit,
   UScreenEditConvert,
@@ -146,7 +146,7 @@ var
   ScreenJukeboxPlaylist: TScreenJukeboxPlaylist;
 
   ScreenScore:        TScreenScore;
-  ScreenTop5:         TScreenTop5;
+  ScreenHighScores:   TScreenHighScores;
   ScreenOptions:          TScreenOptions;
   ScreenOptionsGame:      TScreenOptionsGame;
   ScreenOptionsGraphics:  TScreenOptionsGraphics;
@@ -536,6 +536,8 @@ procedure Initialize3D (Title: string);
 var
   Icon: PSDL_Surface;
   MaxTextureSize: integer;
+  DisplayIndex: integer;
+  DisplayMode: TSDL_DisplayMode;
 begin
   Log.LogStatus('SDL_Init', 'UGraphic.Initialize3D');
   if ( SDL_InitSubSystem(SDL_INIT_VIDEO) = -1 ) then
@@ -549,7 +551,23 @@ begin
   Renderer.DepthTest := true;
   Renderer.SetOrthographicProjection(0, RenderW, RenderH, 0, -1, 100);
   Renderer.VSync := true;
-  SDL_ShowWindow(screen);
+
+  // Borderless fullscreen and windows were started with SDL_WINDOW_HIDDEN flag to avoid flickers during OpenGL
+  // initialization, they need to be shown to the user after the OpenGL context is successfully created
+  if ((CurrentWindowMode = Mode_Borderless) or (CurrentWindowMode = Mode_Windowed)) then
+  begin
+    SDL_ShowWindow(screen);
+    if (CurrentWindowMode = Mode_Borderless) then
+    begin
+      SDL_SetWindowFullscreen(screen, SDL_WINDOW_FULLSCREEN_DESKTOP);
+      DisplayIndex := SDL_GetWindowDisplayIndex(screen);
+      if (DisplayIndex >= 0 ) and (SDL_GetDesktopDisplayMode(DisplayIndex, @DisplayMode) = 0) then
+        OnWindowResized(DisplayMode.w, DisplayMode.h);
+    end
+  end
+  else
+    SDL_SetWindowFullscreen(screen, SDL_WINDOW_FULLSCREEN);
+
 
   // load icon image (must be 32x32 for win32)
   Icon := LoadImage(ResourcesPath.Append(WINDOW_ICON));
@@ -595,9 +613,9 @@ begin
   Log.LogStatus('Creating Category Covers Array', 'Initialization');
   CatCovers:= TCatCovers.Create;
 
-  // Avatars Cache
-  Log.LogStatus('Creating Avatars Cache', 'Initialization');
-  Avatars := TAvatarDatabase.Create;
+  // Avatars
+  Log.LogStatus('Loading Avatars', 'Initialization');
+  Avatars := TAvatarManager.Create;
 
   // Songs
   Log.LogStatus('Creating Song Array', 'Initialization');
@@ -721,7 +739,7 @@ NoDoubledResolution:
     Log.LogStatus('Set Video Mode...   Fullscreen', 'SDL_SetVideoMode');
     CurrentWindowMode := Mode_Fullscreen;
     screen := SDL_CreateWindow('UltraStar Deluxe loading...',
-              SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, W, H, SDL_WINDOW_OPENGL or SDL_WINDOW_FULLSCREEN or SDL_WINDOW_RESIZABLE or SDL_WINDOW_HIDDEN);
+              SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, W, H, SDL_WINDOW_OPENGL or SDL_WINDOW_FULLSCREEN or SDL_WINDOW_RESIZABLE);
   end
   else
   begin
@@ -982,6 +1000,7 @@ procedure LoadScreens(Title: string);
     LoadingStatus: string;
   begin
     SDL_SetWindowTitle(Screen, PChar(Title + ' - ' + Value));
+    Log.LogDebug(Value, 'UGraphic.LoadScreens');
     if Assigned(ScreenLoading) then
     begin
       LoadingStatus := Value;
@@ -1007,7 +1026,7 @@ begin
   Log.BenchmarkEnd(3); Log.LogBenchmark('====> Screen Jukebox Options', 3); Log.BenchmarkStart(3);
   ScreenJukeboxPlaylist :=   TScreenJukeboxPlaylist.Create;
   Log.BenchmarkEnd(3); Log.LogBenchmark('====> Screen Jukebox Playlist', 3); Log.BenchmarkStart(3);
-  ScreenTop5 :=             TScreenTop5.Create;
+  ScreenHighScores :=       TScreenHighScores.Create;
   SetLoadingTitle('Loading ScreenOptions & ScreenOptionsGame');
   ScreenOptions :=          TScreenOptions.Create;
   ScreenOptionsGame :=      TScreenOptionsGame.Create;
@@ -1099,7 +1118,7 @@ begin
   FreeAndNil(ScreenJukebox);
   FreeAndNil(ScreenJukeboxOptions);
   FreeAndNil(ScreenJukeboxPlaylist);
-  FreeAndNil(ScreenTop5);
+  FreeAndNil(ScreenHighScores);
   FreeAndNil(ScreenOpen);
   FreeAndNil(ScreenAbout);
   //ScreenSingModi.Free;

@@ -2119,6 +2119,7 @@ end;
 procedure TScreenSong.SyncCoversToSongs();
 var
   B: integer;
+  CoverFile: IPath;
 begin
   if (Length(Button) = 0) or (Length(CatSongs.Song) = 0) then
     Exit;
@@ -2129,6 +2130,19 @@ begin
       Break;
 
     UnloadCover(B);
+
+    // Refresh creates new category songs without initialized cover textures.
+    if not Assigned(CatSongs.Song[B].CoverTex) then
+    begin
+      CoverFile := CatSongs.Song[B].Path.Append(CatSongs.Song[B].Cover);
+      if not CoverFile.IsFile() then
+        CatSongs.Song[B].Cover := PATH_NONE;
+
+      if CatSongs.Song[B].Cover.IsUnset then
+        CoverFile := Skin.GetTextureFileName('SongCover');
+
+      CatSongs.Song[B].CoverTex := Renderer.CreateEmptyTexture(CoverFile);
+    end;
 
     Button[B].Texture.Free();
     Button[B].Texture := CatSongs.Song[B].CoverTex.Clone();
@@ -4501,9 +4515,9 @@ begin
     Text[TextScoreUser].Text   := DataBase.ReadUser_Score(CatSongs.Song[Interaction].Artist, CatSongs.Song[Interaction].Title, DllMan.Websites[Ini.ShowWebScore].ID, Player[0].Level);
   end;
 
-  Text[TextMaxScoreLocal].Text   := IntToStr(DataBase.ReadMax_ScoreLocal(CatSongs.Song[Interaction].Artist, CatSongs.Song[Interaction].Title, Player[0].Level));
-  Text[TextMediaScoreLocal].Text := IntToStr(DataBase.ReadMedia_ScoreLocal(CatSongs.Song[Interaction].Artist, CatSongs.Song[Interaction].Title, Player[0].Level));
-  Text[TextScoreUserLocal].Text  := DataBase.ReadUser_ScoreLocal(CatSongs.Song[Interaction].Artist, CatSongs.Song[Interaction].Title, Player[0].Level);
+  Text[TextMaxScoreLocal].Text   := IntToStr(DataBase.ReadMax_ScoreLocal(CatSongs.Song[Interaction], Player[0].Level));
+  Text[TextMediaScoreLocal].Text := IntToStr(DataBase.ReadMedia_ScoreLocal(CatSongs.Song[Interaction], Player[0].Level));
+  Text[TextScoreUserLocal].Text  := DataBase.ReadUser_ScoreLocal(CatSongs.Song[Interaction], Player[0].Level);
 
 end;
 

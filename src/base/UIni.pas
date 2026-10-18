@@ -77,6 +77,9 @@ const
   LATENCY_AUTODETECT = -1; // for field Latency
   DEFAULT_RESOLUTION = '800x600';
   DEFAULT_THEME = 'Modern';
+  DEFAULT_HIGH_SCORE_SCREEN_ENTRIES = 5;
+  MIN_HIGH_SCORE_SCREEN_ENTRIES = 5;
+  MAX_HIGH_SCORE_SCREEN_ENTRIES = 20;
   // TODO: the menu options only go up to 6, but there are internals that still go up to 12
   //  IMaxPlayerCount is untouched because lowering (or raising) it causes very strange behaviour, such as:
   //  * the game starts in a completely different language than the config specifies
@@ -205,6 +208,7 @@ type
       Theme:          integer;
       SkinNo:         integer;
       Color:          integer;
+      HighScoreScreenEntries: integer;
       BackgroundMusicOption: integer;
 
       // Record
@@ -218,6 +222,7 @@ type
       OnSongClick:    integer;
       PartyPopup:     integer;
       SingScores:     integer;
+      DuetScores:     integer;
       TopScores:      integer;
       SingTimebarMode:       integer;
       JukeboxTimebarMode:    integer;
@@ -307,6 +312,7 @@ type
       procedure SavePlayerLevels;
       procedure SaveTeamColors;
       procedure SaveShowWebScore;
+      procedure SaveHighScoreScreenEntries;
       procedure SaveJukeboxSongMenu;
       procedure SaveWebcamSettings();
       procedure SaveNumberOfPlayers;
@@ -451,7 +457,8 @@ const
   IScreenFade:    array[0..1] of UTF8String = ('Off', 'On');
   IAskbeforeDel:  array[0..1] of UTF8String = ('Off', 'On');
   ISingScores:    array[0..1] of UTF8String = ('Off', 'On');
-  ITopScores:    array[0..1] of UTF8String = ('All', 'Player');
+  IDuetScores:    array[0..1] of UTF8String = ('Off', 'On');
+  ITopScores:     array[0..1] of UTF8String = ('All', 'Player');
   IOnSongClick:   array[0..2] of UTF8String = ('Sing', 'Select Players', 'Open Menu');
   sStartSing = 0;
   sSelectPlayer = 1;
@@ -560,6 +567,7 @@ var
   IOnSongClickTranslated:      array[0..2] of UTF8String = ('Sing', 'Select Players', 'Open Menu');
   IPartyPopupTranslated:       array[0..1] of UTF8String = ('Off', 'On');
   ISingScoresTranslated:       array[0..1] of UTF8String = ('Off', 'On');
+  IDuetScoresTranslated:       array[0..1] of UTF8String = ('Off', 'On');
   ITopScoresTranslated:        array[0..1] of UTF8String = ('All', 'Player');
 
   IJoypadTranslated:           array[0..1] of UTF8String = ('Off', 'On');
@@ -896,6 +904,9 @@ begin
 
   ISingScoresTranslated[0]          := ULanguage.Language.Translate('OPTION_VALUE_OFF');
   ISingScoresTranslated[1]          := ULanguage.Language.Translate('OPTION_VALUE_ON');
+
+  IDuetScoresTranslated[0]          := ULanguage.Language.Translate('OPTION_VALUE_OFF');
+  IDuetScoresTranslated[1]          := ULanguage.Language.Translate('OPTION_VALUE_ON');
 
   ITopScoresTranslated[0]          := ULanguage.Language.Translate('OPTION_VALUE_ALL');
   ITopScoresTranslated[1]          := ULanguage.Language.Translate('OPTION_VALUE_PLAYER');
@@ -1512,14 +1523,11 @@ var
 begin
   LoadFontFamilyNames;
   ILyricsFont := FontFamilyNames;
-  GamePath := Platform.GetGameUserPath;
-
-  Log.LogStatus( 'GamePath : ' +GamePath.ToNative , '' );
 
   if (Params.ConfigFile.IsSet) then
     FileName := Params.ConfigFile
   else
-    FileName := GamePath.Append('config.ini');
+    FileName := Platform.GetGameUserPath().Append('config.ini');
 
   Log.LogStatus('Using config : ' + FileName.ToNative, 'Ini');
   IniFile := TMemIniFile.Create(FileName.ToNative);
@@ -1583,9 +1591,9 @@ begin
   DataBase.AddWebsite;
 
   // Webs Scores Path
-  WebScoresPath := Path(IniFile.ReadString('Directories', 'WebScoresDir', WebsitePath.ToNative));
+  WebScoresPath := Path(IniFile.ReadString('Directories', 'WebScoresDir', IPath(WebsitePaths[0]).ToNative));
   if not(DirectoryExists(WebScoresPath.ToNative)) then
-    WebScoresPath :=  WebsitePath;
+    WebScoresPath :=  WebsitePaths[0] as IPath;
 
   // ShowWebScore
   if (Length(DllMan.Websites) > 0) then
@@ -1710,8 +1718,19 @@ begin
   // SingScores
   SingScores := ReadArrayIndex(ISingScores, IniFile, 'Advanced', 'SingScores', IGNORE_INDEX, 'On');
 
+  // DuetScores
+  DuetScores := ReadArrayIndex(IDuetScores, IniFile, 'Advanced', 'DuetScores', IGNORE_INDEX, 'On');
+
   // TopScores
   TopScores := ReadArrayIndex(ITopScores, IniFile, 'Advanced', 'TopScores', IGNORE_INDEX, 'Player');
+
+  // Last list length selected on the high-score screen
+  HighScoreScreenEntries := IniFile.ReadInteger(
+    'Advanced', 'HighScoreScreenEntries', DEFAULT_HIGH_SCORE_SCREEN_ENTRIES);
+  if (HighScoreScreenEntries < MIN_HIGH_SCORE_SCREEN_ENTRIES) then
+    HighScoreScreenEntries := MIN_HIGH_SCORE_SCREEN_ENTRIES
+  else if (HighScoreScreenEntries > MAX_HIGH_SCORE_SCREEN_ENTRIES) then
+    HighScoreScreenEntries := MAX_HIGH_SCORE_SCREEN_ENTRIES;
 
   // SyncTo
   SyncTo := ReadArrayIndex(ISyncTo, IniFile, 'Advanced', 'SyncTo', Ord(stMusic));
@@ -2030,8 +2049,14 @@ begin
     //SingScores
     IniFile.WriteString('Advanced', 'SingScores', ISingScores[SingScores]);
 
+    //DuetScores
+    IniFile.WriteString('Advanced', 'DuetScores', IDuetScores[DuetScores]);
+
     //TopScores
     IniFile.WriteString('Advanced', 'TopScores', ITopScores[TopScores]);
+
+    // Last list length selected on the high-score screen
+    IniFile.WriteInteger('Advanced', 'HighScoreScreenEntries', HighScoreScreenEntries);
 
     //SyncTo
     IniFile.WriteString('Advanced', 'SyncTo', ISyncTo[SyncTo]);
@@ -2217,6 +2242,19 @@ begin
   try
     // ShowWebScore
     IniFile.WriteString('Game', 'ShowWebScore', DllMan.Websites[ShowWebScore].Name);
+  finally
+    IniFile.Free;
+  end;
+end;
+
+
+procedure TIni.SaveHighScoreScreenEntries;
+var
+  IniFile: TIniFile;
+begin
+  IniFile := TSafeIniFile.Create(Filename.ToNative, 'TIni.SaveHighScoreScreenEntries');
+  try
+    IniFile.WriteInteger('Advanced', 'HighScoreScreenEntries', HighScoreScreenEntries);
   finally
     IniFile.Free;
   end;

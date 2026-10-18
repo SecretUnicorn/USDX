@@ -77,6 +77,7 @@ type
       SupportsVAO: boolean;
       SupportsFBO: boolean;
       SupportsMappedBuffer: boolean;
+      SupportsMipMap: boolean;
       GlyphTextureFormat: GLint;
 
       MappedBuffer: PGLfloat; // OpenGL 2.0 doesn't support mapped buffers, so we manage it ourself.
@@ -1522,6 +1523,8 @@ end;
 
 function TRenderer_OpenGLBase.LoadTexture(Data: PByte; W, H: integer; const Identifier: IPath; Typ: TTextureType; UseMipmaps: boolean): TTexture;
 begin
+  if (UseMipmaps and (not SupportsMipMap)) then
+    UseMipmaps := false;
   if (Typ = TEXTURE_TYPE_TRANSPARENT) or (Typ = TEXTURE_TYPE_COLORIZED) then
     Result := TTexture_OpenGL.Create(Data, W, H, Identifier, GL_RGBA, 4, GL_CLAMP_TO_EDGE, UseMipmaps)
   else // TEXTURE_TYPE_PLAIN
@@ -1780,6 +1783,7 @@ begin
   SupportsVAO := true;
   SupportsFBO := true;
   SupportsMappedBuffer := true;
+  SupportsMipMap := true;
   GlyphTextureFormat := GL_RED;
   if ((MajorVersion > 3) or ((MajorVersion = 3) and (MinorVersion >= 3))) then
     fSupportsProjectM := true;
@@ -1833,6 +1837,7 @@ var
   GL_OES_vertex_array_object: boolean;
   GL_OES_element_index_uint: boolean;
   GL_EXT_texture_rg: boolean;
+  GL_OES_texture_npot: boolean;
 begin
   if (MajorVersion < 2) then
     raise Exception.Create('Could not initialize OpenGL ES 2.0 or later');
@@ -1842,6 +1847,7 @@ begin
     SupportsVAO := true;
     fSupportsProjectM := true;
     SupportsMappedBuffer := true;
+    SupportsMipMap := true;
     GlyphTextureFormat := GL_RED;
   end
   else
@@ -1858,6 +1864,11 @@ begin
       GlyphTextureFormat := GL_RED
     else
       GlyphTextureFormat := GL_LUMINANCE;
+    GL_OES_texture_npot := Int_CheckExtension(Extensions, 'GL_OES_texture_npot');
+    if (GL_OES_texture_npot) then
+      SupportsMipMap := true
+    else
+      Log.LogInfo('OpenGL ES driver does not support mipmapping for NPOT textures. Mipmapping will be disabled', 'TRenderer_OpenGLES.CheckVersion');
   end;
   SupportsFBO := true;
 end;
@@ -1908,6 +1919,7 @@ begin
   GL_ARB_map_buffer_range := Int_CheckExtension(Extensions, 'GL_ARB_map_buffer_range');
   if (GL_ARB_map_buffer_range) then
     SupportsMappedBuffer := true;
+  SupportsMipMap := true;
   fSupportsProjectM := false;
   SupportsFBO := false;
   GlyphTextureFormat := GL_LUMINANCE;

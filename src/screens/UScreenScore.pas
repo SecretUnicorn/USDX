@@ -327,6 +327,9 @@ var
   SendInfo: TSendInfo;
   Website, index: integer;
 begin
+  if CurrentSong.isDuet then
+    Exit;
+
   if (Value = 1) or (Value = 2) then
   begin
     Website := ScreenPopUpSendScore.SelectValueW;
@@ -378,10 +381,10 @@ begin
         begin
           if (FinishScreenDraw = true) then
           begin
-            if (CurrentSong.isDuet) or (ScreenSong.RapToFreestyle) or (ScreenSong.Mode = smMedley) then
+            if (CurrentSong.isDuet and (Ini.DuetScores = 0)) or (ScreenSong.RapToFreestyle) or (ScreenSong.Mode = smMedley) then
               FadeTo(@ScreenSong)
             else
-              FadeTo(@ScreenTop5);
+              FadeTo(@ScreenHighScores);
             Exit;
           end
           else
@@ -402,10 +405,10 @@ begin
            if (FinishScreenDraw = true) then
            begin
 
-             if (CurrentSong.isDuet) or (ScreenSong.RapToFreestyle) or (ScreenSong.Mode = smMedley) then
+             if (CurrentSong.isDuet and (Ini.DuetScores = 0)) or (ScreenSong.RapToFreestyle) or (ScreenSong.Mode = smMedley) then
                FadeTo(@ScreenSong)
              else
-               FadeTo(@ScreenTop5);
+               FadeTo(@ScreenHighScores);
 
           	 Exit;
            end
@@ -1263,7 +1266,7 @@ begin
   end;
 
   // Show Send Score Buttons
-  if (ScreenSing.SungToEnd) and (Length(DllMan.Websites) > 0) then
+  if ScreenSing.SungToEnd and not CurrentSong.isDuet and (Length(DllMan.Websites) > 0) then
   begin
     case PlayersPlay of
       1: begin
