@@ -849,7 +849,10 @@ begin
     if (Limit > 500) then
       Limit := 500;
 
-    Songs := WebQueue.SearchSongs(GetParam(Query, 'q'), Offset, Limit, Total);
+    Songs := WebQueue.SearchSongs(GetParam(Query, 'q'), Offset, Limit,
+                                  GetParam(Query, 'sort'),
+                                  GetParam(Query, 'dir') = 'desc',
+                                  ParamToID(Query, 'seed'), Total);
     SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
                  SongsToJson(Songs, Total, Offset));
     Exit;

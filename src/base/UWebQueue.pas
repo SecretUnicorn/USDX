@@ -94,6 +94,7 @@ type
 
       // the following methods are safe to call from the web server thread
       function  SearchSongs(const Search: UTF8String; Offset, Limit: integer;
+                            const Sort: UTF8String; Desc: boolean; Seed: cardinal;
                             out Total: integer): TWebSongArray;
       function  SongCount: integer;
       function  CoverOf(SongID: cardinal): UTF8String;
@@ -375,7 +376,32 @@ begin
   end;
 end;
 
+{* Key a song is sorted by on the web page. Everything is a string so one
+   compare serves all four orders. *}
+function SongSortKey(const Song: TWebSong; const Sort: UTF8String; Seed: cardinal;
+                    Desc: boolean): UTF8String;
+begin
+  if (Sort = 'title') then
+    Result := LowerCase(Song.Title) + #1 + LowerCase(Song.Artist)
+  else if (Sort = 'year') then
+  begin
+    // songs without a year belong at the end of the list either way round
+    if (Song.Year <= 0) then
+      Result := IfThen(Desc, '00000', '99999')
+    else
+      Result := Format('%.5d', [Song.Year]);
+    Result := Result + #1 + LowerCase(Song.Artist) + #1 + LowerCase(Song.Title);
+  end
+  else if (Sort = 'random') then
+    // derived from the seed, so the order stays put while the page asks for
+    // further pages and only changes when it sends a new seed
+    Result := IntToHex(WebQueueSongID(IntToStr(Seed) + '/' + IntToStr(Song.ID)), 8)
+  else
+    Result := LowerCase(Song.Artist) + #1 + LowerCase(Song.Title);
+end;
+
 function TWebQueue.SearchSongs(const Search: UTF8String; Offset, Limit: integer;
+                               const Sort: UTF8String; Desc: boolean; Seed: cardinal;
                                out Total: integer): TWebSongArray;
 var
   I, Added:  integer;
@@ -383,6 +409,7 @@ var
   MatchCnt:  integer;
   Needle:    UTF8String;
   Words:     TStringList;
+  Order:     TStringList;
   W:         integer;
   Matched:   boolean;
 begin
@@ -422,6 +449,26 @@ begin
     end;
 
     Total := MatchCnt;
+
+    if (Sort <> '') then
+    begin
+      Order := TStringList.Create;
+      try
+        Order.Capacity := MatchCnt;
+        for I := 0 to MatchCnt - 1 do
+          Order.AddObject(SongSortKey(SongIndex[Matches[I]], Sort, Seed, Desc),
+                          TObject(PtrInt(Matches[I])));
+        Order.Sort;
+
+        for I := 0 to MatchCnt - 1 do
+          if Desc then
+            Matches[MatchCnt - 1 - I] := PtrInt(Order.Objects[I])
+          else
+            Matches[I] := PtrInt(Order.Objects[I]);
+      finally
+        Order.Free;
+      end;
+    end;
 
     if (Offset < 0) then
       Offset := 0;

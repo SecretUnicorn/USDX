@@ -73,6 +73,11 @@ In the game:
   ones USDX has medley data for, and `Left`/`Right` pick how many of them to
   sing. `Enter` starts, `Esc` closes. The queue itself is kept.
 
+The song list can be sorted by artist, title or year, each ascending or
+descending, or shuffled into a random order - the random order is new on every
+page load and the button next to the selector reshuffles it, so the same songs
+do not end up on top all evening.
+
 The request page can show the songs as a plain list, as a list with covers or as
 a grid of covers. Covers are scaled down once and cached in the `webcovers`
 folder of your UltraStar directory, so phones do not download the full size

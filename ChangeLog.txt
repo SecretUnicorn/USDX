@@ -8,6 +8,8 @@ Unreleased
   covers as a list or grid, and the name field is kept across reloads
 - web song queue: songs with medley tags can be queued as a short version that
   sings only the tagged part
+- web song queue: the song list can be sorted by artist, title or year in either
+  direction, or shuffled into a random order that can be reshuffled
 - microphone delay can be measured automatically in the game options: the game
   plays clicks and times how long they take to come back through the microphone,
   which is what wireless speakers make hard to guess. The measured round trip has
