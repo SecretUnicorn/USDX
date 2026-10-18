@@ -57,6 +57,7 @@ ppaslink.sh
 # game folders
 /game/playlists/
 /game/screenshots/
+/game/webcovers/
 /game/songs/
 
 # game files

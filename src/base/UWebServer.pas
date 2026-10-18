@@ -43,6 +43,19 @@ uses
   Classes;
 
 type
+  TWebServerThread = class;
+
+  {* One request, so that a phone that stops reading cannot hold up the rest. *}
+  TWebClientThread = class(TThread)
+    private
+      fServer: TWebServerThread;
+      fSock:   longint;
+    protected
+      procedure Execute; override;
+    public
+      constructor Create(AServer: TWebServerThread; ASock: longint);
+  end;
+
   TWebServerThread = class(TThread)
     private
       fPort:     integer; // port asked for, the bound one may be higher
@@ -56,8 +69,9 @@ type
       function  ReadRequest(Sock: longint; out Method, Path, Body: RawByteString): boolean;
       procedure SendRaw(Sock: longint; const Data: RawByteString);
       procedure SendResponse(Sock: longint; const Status, ContentType: RawByteString;
-                             const Body: RawByteString);
-      procedure Route(Sock: longint; const Method, Path, Body: RawByteString);
+                             const Body: RawByteString; const CacheControl: RawByteString = 'no-store');
+      procedure SendCover(Sock: longint; SongID: cardinal);
+      procedure Route(Sock: longint; const Method, RequestPath, Body: RawByteString);
     protected
       procedure Execute; override;
     public
@@ -105,9 +119,14 @@ uses
   BaseUnix,
   UnixType,
   {$ENDIF}
+  Math,
   StrUtils,
+  sdl2,
   UIni,
+  UImage,
   ULog,
+  UPath,
+  UPathUtils,
   UWebQueue;
 
 const
@@ -115,9 +134,13 @@ const
   MaxRequestSize = 16 * 1024;
   MaxBodySize    = 8 * 1024;
   // clients that stop talking to us must not block the whole server
-  ClientTimeoutMs = 5000;
+  ClientTimeoutMs = 3000;
   // if the configured port is taken, try a few of the following ones
   PortsToTry = 12;
+  // requests handled at the same time; a party does not need more
+  MaxClients = 16;
+  // long edge of the cover thumbnails served to the phones
+  CoverThumbSize = 256;
 
 {$IFDEF DARWIN}
 const
@@ -140,6 +163,8 @@ const
 
 var
   CachedPage: RawByteString = '';
+  ActiveClients: longint = 0;
+  ThumbLock: TRTLCriticalSection;
 
 {$I UWebQueuePage.inc}
 
@@ -453,20 +478,47 @@ begin
       {$ENDIF}
     {$ENDIF}
 
-    try
-      HandleClient(Client);
-    except
-      on E: Exception do
-        Log.LogError('Request failed: ' + E.Message, 'UWebServer');
+    if (InterlockedIncrement(ActiveClients) > MaxClients) then
+    begin
+      // rather drop one request than let the queue of phones build up
+      InterlockedDecrement(ActiveClients);
+      CloseSocket(Client);
+      Continue;
     end;
 
-    CloseSocket(Client);
+    TWebClientThread.Create(Self, Client);
   end;
 
   if (fListen >= 0) then
   begin
     CloseSocket(fListen);
     fListen := -1;
+  end;
+end;
+
+{ TWebClientThread }
+
+constructor TWebClientThread.Create(AServer: TWebServerThread; ASock: longint);
+begin
+  fServer         := AServer;
+  fSock           := ASock;
+  FreeOnTerminate := true;
+
+  inherited Create(false);
+end;
+
+procedure TWebClientThread.Execute;
+begin
+  try
+    try
+      fServer.HandleClient(fSock);
+    except
+      on E: Exception do
+        Log.LogError('Request failed: ' + E.Message, 'UWebServer');
+    end;
+  finally
+    CloseSocket(fSock);
+    InterlockedDecrement(ActiveClients);
   end;
 end;
 
@@ -493,14 +545,14 @@ begin
 end;
 
 procedure TWebServerThread.SendResponse(Sock: longint; const Status, ContentType: RawByteString;
-                                        const Body: RawByteString);
+                                        const Body: RawByteString; const CacheControl: RawByteString = 'no-store');
 var
   Header: RawByteString;
 begin
   Header := 'HTTP/1.1 ' + Status + #13#10 +
             'Content-Type: ' + ContentType + #13#10 +
             'Content-Length: ' + IntToStr(Length(Body)) + #13#10 +
-            'Cache-Control: no-store' + #13#10 +
+            'Cache-Control: ' + CacheControl + #13#10 +
             'Connection: close' + #13#10#13#10;
 
   SendRaw(Sock, Header + Body);
@@ -618,7 +670,8 @@ begin
       '","language":"' + JsonEscape(Songs[I].Language) +
       '","genre":"' + JsonEscape(Songs[I].Genre) +
       '","year":' + IntToStr(Songs[I].Year) +
-      ',"duet":' + IfThen(Songs[I].IsDuet, 'true', 'false') + '}';
+      ',"duet":' + IfThen(Songs[I].IsDuet, 'true', 'false') +
+      ',"short":' + IfThen(Songs[I].HasMedley, 'true', 'false') + '}';
   end;
 
   Result := Result + ']}';
@@ -642,20 +695,131 @@ begin
       '{"entry":' + IntToStr(Entries[I].EntryID) +
       ',"artist":"' + JsonEscape(Entries[I].Artist) +
       '","title":"' + JsonEscape(Entries[I].Title) +
-      '","singer":"' + JsonEscape(Entries[I].Singer) + '"}';
+      '","singer":"' + JsonEscape(Entries[I].Singer) +
+      '","short":' + IfThen(Entries[I].Short, 'true', 'false') + '}';
   end;
 
   Result := Result + ']}';
 end;
 
-procedure TWebServerThread.Route(Sock: longint; const Method, Path, Body: RawByteString);
+{**
+ * Scales a cover down once and keeps it in the user folder. The originals are
+ * often several hundred KB, which a phone showing a grid of them cannot afford.
+ *
+ * shortcut: runs on a request thread rather than the main thread. SDL_image
+ * decoding is CPU side, so this is fine; move it to the per frame main thread
+ * hook in UWebQueue if it ever turns out not to be.
+ *}
+function MakeCoverThumbnail(const Source, Target: IPath): boolean;
+var
+  Surface: PSDL_Surface;
+  W, H:    integer;
+  Scale:   real;
+begin
+  Result := false;
+
+  EnterCriticalSection(ThumbLock);
+  try
+    // another request may have generated it while we waited
+    if Target.IsFile then
+    begin
+      Result := true;
+      Exit;
+    end;
+
+    Surface := LoadImage(Source);
+    if (Surface = nil) then
+      Exit;
+
+    try
+      W := Surface^.w;
+      H := Surface^.h;
+      if (W <= 0) or (H <= 0) then
+        Exit;
+
+      // keep the aspect ratio, covers are not all square
+      Scale := CoverThumbSize / Max(W, H);
+      if (Scale < 1) then
+      begin
+        W := Max(1, Round(W * Scale));
+        H := Max(1, Round(H * Scale));
+        ScaleImage(Surface, W, H);
+      end;
+
+      Result := WriteJPGImage(Target, Surface, 80);
+    finally
+      SDL_FreeSurface(Surface);
+    end;
+  finally
+    LeaveCriticalSection(ThumbLock);
+  end;
+end;
+
+function ReadFileBytes(const FileName: IPath; out Data: RawByteString): boolean;
+var
+  Stream: TUnicodeMemoryStream;
+begin
+  Result := false;
+  Data   := '';
+
+  Stream := TUnicodeMemoryStream.Create;
+  try
+    try
+      Stream.LoadFromFile(FileName);
+    except
+      Exit;
+    end;
+
+    SetLength(Data, Stream.Size);
+    if (Stream.Size > 0) then
+      System.Move(Stream.Memory^, Data[1], Stream.Size);
+
+    Result := true;
+  finally
+    Stream.Free;
+  end;
+end;
+
+procedure TWebServerThread.SendCover(Sock: longint; SongID: cardinal);
+var
+  CoverPath: UTF8String;
+  CacheFile: IPath;
+  Data:      RawByteString;
+begin
+  CoverPath := WebQueue.CoverOf(SongID);
+
+  if (CoverPath = '') or WebCoversPath.IsUnset then
+  begin
+    SendResponse(Sock, '404 Not Found', 'text/plain; charset=utf-8', 'no cover');
+    Exit;
+  end;
+
+  CacheFile := WebCoversPath.Append(IntToStr(SongID) + '.jpg');
+
+  if (not CacheFile.IsFile) and (not MakeCoverThumbnail(Path(CoverPath), CacheFile)) then
+  begin
+    SendResponse(Sock, '404 Not Found', 'text/plain; charset=utf-8', 'cover unreadable');
+    Exit;
+  end;
+
+  if not ReadFileBytes(CacheFile, Data) then
+  begin
+    SendResponse(Sock, '404 Not Found', 'text/plain; charset=utf-8', 'cover unreadable');
+    Exit;
+  end;
+
+  // the thumbnail for a song id never changes, let the phone keep it
+  SendResponse(Sock, '200 OK', 'image/jpeg', Data, 'public, max-age=86400');
+end;
+
+procedure TWebServerThread.Route(Sock: longint; const Method, RequestPath, Body: RawByteString);
 var
   Target, Query: RawByteString;
   P: integer;
   Songs: TWebSongArray;
   Total, Offset, Limit: integer;
 begin
-  Target := Path;
+  Target := RequestPath;
   Query  := '';
 
   P := Pos('?', Target);
@@ -674,8 +838,6 @@ begin
   // the song request page
   if (Method = 'GET') and ((Target = '/') or (Target = '/index.html')) then
   begin
-    if (CachedPage = '') then
-      CachedPage := BuildWebQueuePage;
     SendResponse(Sock, '200 OK', 'text/html; charset=utf-8', CachedPage);
     Exit;
   end;
@@ -695,7 +857,19 @@ begin
 
   if (Method = 'GET') and (Target = '/api/queue') then
   begin
-    SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', QueueToJson);
+    // the page polls this every few seconds per phone, so answer the common
+    // "nothing changed since rev N" case without building the whole list
+    if (GetParam(Query, 'rev') <> '') and (ParamToID(Query, 'rev') = WebQueue.Revision) then
+      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
+                   '{"rev":' + IntToStr(WebQueue.Revision) + ',"unchanged":true}')
+    else
+      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', QueueToJson);
+    Exit;
+  end;
+
+  if (Method = 'GET') and (Target = '/api/cover') then
+  begin
+    SendCover(Sock, ParamToID(Query, 'id'));
     Exit;
   end;
 
@@ -712,7 +886,8 @@ begin
   if (Method = 'POST') and (Target = '/api/queue/add') then
   begin
     if WebQueue.Enqueue(ParamToID(Body, 'id'),
-                        GetParam(Body, 'singer')) then
+                        GetParam(Body, 'singer'),
+                        GetParam(Body, 'short') = '1') then
       SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', '{"ok":true}')
     else
       SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
@@ -780,6 +955,17 @@ begin
     Exit;
   end;
 
+  // A phone that walks out of wifi mid response makes send() raise SIGPIPE,
+  // which kills the whole game (this is what crashed it on 2026-10-10). The
+  // per socket option below is kept as well, but this covers every send.
+  {$IFDEF UNIX}
+  fpSignal(SIGPIPE, SignalHandler(SIG_IGN));
+  {$ENDIF}
+
+  // build the page once instead of lazily from whichever request gets there first
+  if (CachedPage = '') then
+    CachedPage := BuildWebQueuePage;
+
   fPort := APort;
   fThread := TWebServerThread.Create(APort);
 
@@ -836,5 +1022,11 @@ begin
 
   fAddress := '';
 end;
+
+initialization
+  InitCriticalSection(ThumbLock);
+
+finalization
+  DoneCriticalSection(ThumbLock);
 
 end.

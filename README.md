@@ -51,7 +51,8 @@ On the next start the game opens a small web server on that port and shows the
 address to open (for example `http://192.168.1.20:8080`) in the queue overlay at
 the bottom left of the screen. Everyone on the same network can open that page,
 search the song list and add songs to the queue; entries can be reordered or
-removed from the page again.
+removed from the page again. Songs that carry medley in/out tags also offer a
+**SHORT** button, which queues only the tagged part of the song.
 
 If the configured port is already taken by another program, the next free port
 is used and the overlay shows the address that actually works.
@@ -68,9 +69,17 @@ In the game:
   is built there - confirm the players once, then `Ctrl+N` starts songs directly.
 - `Ctrl+L` shows/hides the queue overlay. `Overlay=Off` hides it by default.
 - `Ctrl+Q` shows/hides a big QR code of the address for guests to scan.
+- `Ctrl+M` turns the queue into a medley: it lists the queued songs, marks the
+  ones USDX has medley data for, and `Left`/`Right` pick how many of them to
+  sing. `Enter` starts, `Esc` closes. The queue itself is kept.
 
-The server only serves the request page and its JSON endpoints, it never exposes
-files. It has no authentication, so only enable it on a network you trust.
+The request page can show the songs as a plain list, as a list with covers or as
+a grid of covers. Covers are scaled down once and cached in the `webcovers`
+folder of your UltraStar directory, so phones do not download the full size
+images.
+
+The server only serves the request page, its JSON endpoints and those cover
+thumbnails, it never exposes other files. It has no authentication, so only enable it on a network you trust.
 
 If a phone refuses to open the address, let it scan the QR code instead of typing
 the address: Chrome's "Always use secure connections" turns a typed IP into an

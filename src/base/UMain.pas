@@ -540,6 +540,19 @@ begin
           // remap the "keypad enter" key to the "standard enter" key
           if (Event.key.keysym.sym = SDLK_KP_ENTER) then Event.key.keysym.sym := SDLK_RETURN;
 
+          // the medley picker owns the keyboard while it is open
+          if (Event.type_ = SDL_KEYDOWN) and WebQueueEnabled and Assigned(WebQueue) and
+             WebQueueMedleyPickerVisible then
+          begin
+            case Event.key.keysym.sym of
+              SDLK_LEFT:   WebQueueMedleyAdjust(-1);
+              SDLK_RIGHT:  WebQueueMedleyAdjust(1);
+              SDLK_RETURN: WebQueueMedleyStart;
+              SDLK_ESCAPE: CloseWebQueueMedleyPicker;
+            end;
+            Continue;
+          end;
+
           // escape closes the QR code overlay instead of leaving the screen
           // that is covered by it
           if (Event.type_ = SDL_KEYDOWN) and WebQueueEnabled and Assigned(WebQueue) and
@@ -567,6 +580,11 @@ begin
             else if (Event.key.keysym.sym = SDLK_Q) then
             begin
               ToggleWebQueueQRCode;
+              Continue;
+            end
+            else if (Event.key.keysym.sym = SDLK_M) then
+            begin
+              ToggleWebQueueMedleyPicker;
               Continue;
             end;
           end;

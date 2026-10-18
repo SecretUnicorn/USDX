@@ -4,6 +4,13 @@ Unreleased
   the song collection and queue songs from their phone ([WebQueue] in config.ini).
   The queue is shown in-game, Ctrl+N sings the next entry, Ctrl+L hides the overlay
   and Ctrl+Q shows a QR code of the address for guests to scan
+- web song queue: Ctrl+M turns the queue into a medley, the request page can show
+  covers as a list or grid, and the name field is kept across reloads
+- web song queue: songs with medley tags can be queued as a short version that
+  sings only the tagged part
+- web song queue: each request is handled in its own thread, so several phones no
+  longer wait for each other, and a dropped connection can no longer kill the game
+  with SIGPIPE
 
 
 Ultrastar Deluxe 1.3.2 Beta - 2016-08-05

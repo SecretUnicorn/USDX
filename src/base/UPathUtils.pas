@@ -45,6 +45,7 @@ var
   LogPath:          IPath;
   ThemePaths:       IInterfaceList;
   ScreenshotsPath:  IPath;
+  WebCoversPath:    IPath;
   CoverPaths:       IInterfaceList;
   LanguagesPath:    IPath;
   PluginPaths:      IInterfaceList;
@@ -215,6 +216,12 @@ begin
   if (not FindPath(ScreenshotsPath, UserPath.Append('screenshots'), true)) then
   begin
     Log.LogWarn('Screenshot directory "'+ UserPath.ToNative +'" not available', 'UPathUtils.InitializePaths');
+  end;
+
+  // Cover thumbnails for the song request page (must be writable)
+  if (not FindPath(WebCoversPath, UserPath.Append('webcovers'), true)) then
+  begin
+    Log.LogWarn('Web cover directory "'+ UserPath.ToNative +'" not available', 'UPathUtils.InitializePaths');
   end;
 
   // Add song paths

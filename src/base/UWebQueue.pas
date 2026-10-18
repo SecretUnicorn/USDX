@@ -53,7 +53,9 @@ type
     Edition:    UTF8String;
     Year:       integer;
     IsDuet:     boolean;
+    HasMedley:  boolean;    // has medley in/out tags, so it can be sung short
     Path:       UTF8String; // full path of the txt file, used to find the song again
+    Cover:      UTF8String; // full path of the cover image, empty if there is none
     SearchText: UTF8String; // lower case ASCII, used for the web search
   end;
   TWebSongArray = array of TWebSong;
@@ -65,6 +67,7 @@ type
     Artist:  UTF8String;
     Title:   UTF8String;
     Singer:  UTF8String;    // optional name entered on the web page
+    Short:   boolean;       // sing only the part between the medley tags
     Path:    UTF8String;
   end;
   TWebQueueEntryArray = array of TWebQueueEntry;
@@ -93,8 +96,9 @@ type
       function  SearchSongs(const Search: UTF8String; Offset, Limit: integer;
                             out Total: integer): TWebSongArray;
       function  SongCount: integer;
+      function  CoverOf(SongID: cardinal): UTF8String;
       function  IndexReady: boolean;
-      function  Enqueue(SongID: cardinal; const Singer: UTF8String): boolean;
+      function  Enqueue(SongID: cardinal; const Singer: UTF8String; Short: boolean): boolean;
       function  RemoveEntry(EntryID: cardinal): boolean;
       function  MoveEntry(EntryID: cardinal; Offset: integer): boolean;
       procedure Clear;
@@ -126,6 +130,13 @@ procedure DrawWebQueueOverlay;
 procedure ToggleWebQueueOverlay;
 function  WebQueueOverlayVisible: boolean;
 
+{* Shows/hides the picker that turns the queue into a medley. *}
+procedure ToggleWebQueueMedleyPicker;
+function  WebQueueMedleyPickerVisible: boolean;
+procedure WebQueueMedleyAdjust(Delta: integer);
+procedure WebQueueMedleyStart;
+procedure CloseWebQueueMedleyPicker;
+
 {* Shows/hides the big QR code of the song request address. *}
 procedure ToggleWebQueueQRCode;
 function  WebQueueQRCodeVisible: boolean;
@@ -135,11 +146,13 @@ implementation
 
 uses
   Math,
+  StrUtils,
   UDisplay,
   UGraphic,
   UIni,
   ULanguage,
   ULog,
+  UNote,
   UParty,
   UPath,
   UPlaylist,
@@ -152,9 +165,20 @@ uses
   UText,
   UWebServer;
 
+type
+  {* One queue entry as offered in the medley picker. *}
+  TWebMedleyCandidate = record
+    Entry:    TWebQueueEntry;
+    Eligible: boolean;
+  end;
+  TWebMedleyCandidateArray = array of TWebMedleyCandidate;
+
 const
   // number of queue entries shown in the in-game overlay
   OverlayMaxEntries = 5;
+  // checking medley data parses and analyses a song, so do not do it for a
+  // whole party worth of requests at once
+  MedleyPickerMaxSongs = 20;
   // upper bound for the queue, keeps a misbehaving client from filling memory
   WebQueueMaxLength = 100;
 
@@ -165,6 +189,12 @@ var
   CachedRevision:  cardinal = 0;
   CachedEntries:   TWebQueueEntryArray;
   CacheValid:      boolean = false;
+
+  MedleyPickerOpen:  boolean = false;
+  MedleyRequested:   boolean = false;
+  MedleyCandidates:  TWebMedleyCandidateArray;
+  MedleyEligible:    integer = 0; // how many candidates can actually be sung
+  MedleyCount:       integer = 0; // how many of them the user picked
 
   QRVisible:       boolean = false;
   QRCode:          TQRCode;
@@ -281,9 +311,11 @@ end;
 procedure TWebQueue.RebuildSongIndex;
 var
   I, Count: integer;
-  CurSong:  TSong;
-  NewIndex: TWebSongArray;
-  FullPath: UTF8String;
+  CurSong:   TSong;
+  NewIndex:  TWebSongArray;
+  FullPath:  UTF8String;
+  CoverPath: UTF8String;
+  CoverFile: IPath;
 begin
   if (not Assigned(Songs)) or (not Assigned(Songs.SongList)) then
     Exit;
@@ -303,6 +335,16 @@ begin
 
     FullPath := CurSong.Path.Append(CurSong.FileName).ToUTF8();
 
+    // #COVER is relative to the song folder and is never checked while parsing
+    CoverPath := '';
+    if (CurSong.Cover <> nil) and CurSong.Cover.IsSet then
+    begin
+      CoverFile := CurSong.Path.Append(CurSong.Cover);
+      CoverFile := CoverFile.AdjustCase(false);
+      if CoverFile.IsFile then
+        CoverPath := CoverFile.ToUTF8();
+    end;
+
     NewIndex[Count].ID         := WebQueueSongID(FullPath);
     NewIndex[Count].Artist     := CurSong.Artist;
     NewIndex[Count].Title      := CurSong.Title;
@@ -311,7 +353,10 @@ begin
     NewIndex[Count].Edition    := CurSong.Edition;
     NewIndex[Count].Year       := CurSong.Year;
     NewIndex[Count].IsDuet     := CurSong.isDuet;
+    // only the explicit tags, a guessed refrain is not what the guest picked
+    NewIndex[Count].HasMedley  := (CurSong.Medley.Source >= msTag);
     NewIndex[Count].Path       := FullPath;
+    NewIndex[Count].Cover      := CoverPath;
     NewIndex[Count].SearchText := CurSong.ArtistASCII + ' ' + CurSong.TitleASCII + ' ' +
                                   CurSong.LanguageASCII + ' ' + CurSong.EditionASCII + ' ' +
                                   CurSong.GenreASCII + ' ' + IntToStr(CurSong.Year);
@@ -408,6 +453,22 @@ begin
   end;
 end;
 
+function TWebQueue.CoverOf(SongID: cardinal): UTF8String;
+var
+  Index: integer;
+begin
+  Result := '';
+
+  EnterCriticalSection(Lock);
+  try
+    Index := FindSongIndex(SongID);
+    if (Index >= 0) then
+      Result := SongIndex[Index].Cover;
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+end;
+
 function TWebQueue.IndexReady: boolean;
 begin
   EnterCriticalSection(Lock);
@@ -418,7 +479,7 @@ begin
   end;
 end;
 
-function TWebQueue.Enqueue(SongID: cardinal; const Singer: UTF8String): boolean;
+function TWebQueue.Enqueue(SongID: cardinal; const Singer: UTF8String; Short: boolean): boolean;
 var
   SongIdx, Len: integer;
 begin
@@ -442,6 +503,7 @@ begin
     Entries[Len].Title   := SongIndex[SongIdx].Title;
     Entries[Len].Path    := SongIndex[SongIdx].Path;
     Entries[Len].Singer  := Copy(Singer, 1, 40);
+    Entries[Len].Short   := Short and SongIndex[SongIdx].HasMedley;
 
     Inc(NextEntryID);
     Inc(fRevision);
@@ -677,10 +739,25 @@ begin
     end;
 
     ScreenSong.SetScrollRefresh;
-    ScreenSong.StartSong;
+
+    if Entry.Short and ScreenSong.EnsureMedleyData(CatIndex, msTag) then
+    begin
+      // a medley of exactly one song is the short version: USDX then sings
+      // only the part between the medley in and out tags
+      SetLength(PlaylistMedley.Song, 1);
+      PlaylistMedley.Song[0] := CatIndex;
+      PlaylistMedley.NumMedleySongs := 1;
+      ScreenSong.Mode := smMedley;
+      ScreenSong.StopMusicPreview();
+      Display.FadeTo(@ScreenSing);
+    end
+    else
+      ScreenSong.StartSong;
+
     QRVisible := false;
 
-    Log.LogStatus('Starting queued song: ' + Entry.Artist + ' - ' + Entry.Title,
+    Log.LogStatus('Starting queued song' + IfThen(Entry.Short, ' (short)', '') + ': ' +
+                  Entry.Artist + ' - ' + Entry.Title,
                   'UWebQueue.StartNextQueuedSong');
 
     Result := true;
@@ -688,9 +765,135 @@ begin
   end;
 end;
 
+{**
+ * Collects the queued songs that USDX can actually medley. Deciding that means
+ * parsing and analysing each song, which is why the list is capped.
+ *}
+procedure OpenMedleyPicker;
+var
+  Entries: TWebQueueEntryArray;
+  I, Idx, Count: integer;
+begin
+  Entries := WebQueue.GetEntries;
+
+  Count := Length(Entries);
+  if (Count > MedleyPickerMaxSongs) then
+    Count := MedleyPickerMaxSongs;
+
+  SetLength(MedleyCandidates, Count);
+  MedleyEligible := 0;
+
+  for I := 0 to Count - 1 do
+  begin
+    MedleyCandidates[I].Entry := Entries[I];
+
+    Idx := FindCatSongIndex(Entries[I]);
+    MedleyCandidates[I].Eligible :=
+      (Idx >= 0) and ScreenSong.EnsureMedleyData(Idx, msCalculated);
+
+    if MedleyCandidates[I].Eligible then
+      Inc(MedleyEligible);
+  end;
+
+  MedleyCount      := MedleyEligible;
+  MedleyPickerOpen := true;
+end;
+
+procedure CloseWebQueueMedleyPicker;
+begin
+  MedleyPickerOpen := false;
+  SetLength(MedleyCandidates, 0);
+end;
+
+procedure ToggleWebQueueMedleyPicker;
+begin
+  if MedleyPickerOpen then
+    CloseWebQueueMedleyPicker
+  else if Assigned(WebQueue) and Assigned(ScreenSong) and (WebQueue.Count > 0) then
+    OpenMedleyPicker;
+end;
+
+function WebQueueMedleyPickerVisible: boolean;
+begin
+  Result := MedleyPickerOpen;
+end;
+
+procedure WebQueueMedleyAdjust(Delta: integer);
+begin
+  if (not MedleyPickerOpen) or (MedleyEligible = 0) then
+    Exit;
+
+  MedleyCount := MedleyCount + Delta;
+  if (MedleyCount < 1) then
+    MedleyCount := 1;
+  if (MedleyCount > MedleyEligible) then
+    MedleyCount := MedleyEligible;
+end;
+
+procedure WebQueueMedleyStart;
+begin
+  if (not MedleyPickerOpen) or (MedleyEligible = 0) then
+    Exit;
+
+  MedleyPickerOpen := false;
+  MedleyRequested  := true;
+end;
+
+{**
+ * Fills PlaylistMedley from the picked songs and starts singing. Must run
+ * after TScreenSong.OnShow, which wipes that list and resets the mode.
+ *}
+function StartQueuedMedley: boolean;
+var
+  I, Idx, Taken: integer;
+begin
+  Result := false;
+
+  // may rebuild CatSongs.Song, so the indices have to be looked up afterwards
+  ResetSongView;
+
+  Taken := 0;
+  SetLength(PlaylistMedley.Song, 0);
+
+  for I := 0 to High(MedleyCandidates) do
+  begin
+    if (Taken >= MedleyCount) then
+      Break;
+    if (not MedleyCandidates[I].Eligible) then
+      Continue;
+
+    Idx := FindCatSongIndex(MedleyCandidates[I].Entry);
+    if (Idx < 0) then
+      Continue;
+
+    SetLength(PlaylistMedley.Song, Taken + 1);
+    PlaylistMedley.Song[Taken] := Idx;
+    Inc(Taken);
+  end;
+
+  if (Taken = 0) then
+  begin
+    Log.LogWarn('No queued song has medley data', 'UWebQueue.StartQueuedMedley');
+    Exit;
+  end;
+
+  PlaylistMedley.NumMedleySongs := Taken;
+  ScreenSong.MakeMedley := false;
+  ScreenSong.Mode := smMedley;
+
+  Log.LogStatus(Format('Starting medley of %d queued songs', [Taken]),
+                'UWebQueue.StartQueuedMedley');
+
+  Display.FadeTo(@ScreenSing);
+  SetLength(MedleyCandidates, 0);
+  QRVisible := false;
+
+  Result := true;
+end;
+
 procedure ProcessWebQueueRequest;
 begin
-  if (not StartRequested) then
+  if (not StartRequested) and (not MedleyRequested) then
     Exit;
 
   if (not Assigned(WebQueue)) or (not Assigned(Display)) or (not Assigned(ScreenSong)) then
@@ -702,7 +905,8 @@ begin
   // nothing left to start
   if (WebQueue.Count = 0) then
   begin
-    StartRequested := false;
+    StartRequested  := false;
+    MedleyRequested := false;
     Exit;
   end;
 
@@ -715,7 +919,8 @@ begin
      (Display.CurrentScreen = @ScreenEditConvert) or
      (Display.CurrentScreen = @ScreenEdit) then
   begin
-    StartRequested := false;
+    StartRequested  := false;
+    MedleyRequested := false;
     Log.LogInfo('Song request ignored while the editor is open', 'UWebQueue.ProcessWebQueueRequest');
     Exit;
   end;
@@ -723,7 +928,8 @@ begin
   // a running party game has its own song selection, do not interfere
   if Party.bPartyGame then
   begin
-    StartRequested := false;
+    StartRequested  := false;
+    MedleyRequested := false;
     Log.LogWarn('Song request ignored, a party game is running', 'UWebQueue.ProcessWebQueueRequest');
     Exit;
   end;
@@ -733,7 +939,8 @@ begin
   // request then starts the song right away.
   if (not Assigned(ScreenSing)) or (not Assigned(ScreenScore)) then
   begin
-    StartRequested := false;
+    StartRequested  := false;
+    MedleyRequested := false;
     Log.LogInfo('Player setup needed before the first requested song can start',
                 'UWebQueue.ProcessWebQueueRequest');
     if (Display.CurrentScreen <> @ScreenName) then
@@ -746,8 +953,16 @@ begin
 
   if (Display.CurrentScreen = @ScreenSong) then
   begin
-    StartRequested := false;
-    StartNextQueuedSong;
+    if MedleyRequested then
+    begin
+      MedleyRequested := false;
+      StartQueuedMedley;
+    end
+    else
+    begin
+      StartRequested := false;
+      StartNextQueuedSong;
+    end;
   end
   else if (Display.CurrentScreen = @ScreenSing) then
   begin
@@ -859,6 +1074,8 @@ begin
         SetFontColor(0.75, 0.75, 0.75, 1);
 
       Line := IntToStr(I + 1) + '. ' + CachedEntries[I].Artist + ' - ' + CachedEntries[I].Title;
+      if CachedEntries[I].Short then
+        Line := Line + ' (' + Language.Translate('WEBQUEUE_SHORT') + ')';
       if (CachedEntries[I].Singer <> '') then
         Line := Line + ' [' + CachedEntries[I].Singer + ']';
 
@@ -968,6 +1185,97 @@ begin
   Renderer.DepthTest := true;
 end;
 
+{**
+ * The medley picker: every queued song with whether it can be sung in a medley,
+ * and how many of them to use.
+ *}
+procedure DrawMedleyPicker;
+var
+  I, Shown, Taken: integer;
+  PanelX, PanelY, PanelW, PanelH, LineY: real;
+  Line: UTF8String;
+const
+  LineHeight = 17;
+  HeaderHeight = 30;
+begin
+  Shown := Length(MedleyCandidates);
+
+  PanelW := 560;
+  PanelH := HeaderHeight + LineHeight * (Shown + 2) + 18;
+  PanelX := (800 - PanelW) / 2;
+  PanelY := (600 - PanelH) / 2;
+
+  Renderer.DepthTest := false;
+  Renderer.DrawQuad(0, 0, 0, 800, 600, 0, 0, 0, 0.7);
+  Renderer.DrawQuad(PanelX, PanelY, 0, PanelW, PanelH, 0.07, 0.08, 0.12, 0.96);
+
+  SetFontFamily(0);
+  SetFontStyle(ftRegular);
+  SetFontItalic(false);
+  SetFontReflection(false, 0);
+
+  SetFontSize(21);
+  SetFontColor(1, 0.82, 0.2, 1);
+  SetFontPos(PanelX + 12, PanelY + 6);
+  PrintText(Language.Translate('WEBQUEUE_MEDLEY_TITLE'));
+
+  SetFontSize(15);
+  LineY := PanelY + HeaderHeight;
+  Taken := 0;
+
+  for I := 0 to Shown - 1 do
+  begin
+    if MedleyCandidates[I].Eligible and (Taken < MedleyCount) then
+    begin
+      Inc(Taken);
+      SetFontColor(1, 1, 1, 1);
+      Line := IntToStr(Taken) + '. ';
+    end
+    else if MedleyCandidates[I].Eligible then
+    begin
+      SetFontColor(0.6, 0.6, 0.6, 1);
+      Line := '-  ';
+    end
+    else
+    begin
+      SetFontColor(0.55, 0.4, 0.4, 1);
+      Line := '-  ';
+    end;
+
+    Line := Line + MedleyCandidates[I].Entry.Artist + ' - ' + MedleyCandidates[I].Entry.Title;
+    if (not MedleyCandidates[I].Eligible) then
+      Line := Line + '  (' + Language.Translate('WEBQUEUE_MEDLEY_SKIP') + ')';
+
+    SetFontPos(PanelX + 12, LineY);
+    PrintText(TruncateToWidth(Line, PanelW - 24));
+    LineY := LineY + LineHeight;
+  end;
+
+  LineY := LineY + LineHeight * 0.4;
+
+  if (MedleyEligible = 0) then
+  begin
+    SetFontColor(1, 0.6, 0.4, 1);
+    Line := Language.Translate('WEBQUEUE_MEDLEY_NONE');
+  end
+  else
+  begin
+    SetFontColor(1, 0.82, 0.2, 1);
+    Line := Format(Language.Translate('WEBQUEUE_MEDLEY_COUNT'), [MedleyCount, MedleyEligible]);
+  end;
+
+  SetFontSize(17);
+  SetFontPos(PanelX + 12, LineY);
+  PrintText(TruncateToWidth(Line, PanelW - 24));
+
+  SetFontSize(14);
+  SetFontColor(0.7, 0.7, 0.7, 1);
+  SetFontPos(PanelX + 12, LineY + LineHeight + 2);
+  PrintText(TruncateToWidth(Language.Translate('WEBQUEUE_MEDLEY_HINT'), PanelW - 24));
+
+  Renderer.DepthTest := true;
+end;
+
 procedure DrawWebQueueOverlay;
 begin
   if (not Assigned(WebQueue)) or (not WebQueueEnabled) then
@@ -982,6 +1290,9 @@ begin
 
   if QRVisible then
     DrawQRPanel;
+
+  if MedleyPickerOpen then
+    DrawMedleyPicker;
 end;
 
 end.
