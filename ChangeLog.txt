@@ -10,7 +10,9 @@ Unreleased
   sings only the tagged part
 - microphone delay can be measured automatically in the game options: the game
   plays clicks and times how long they take to come back through the microphone,
-  which is what wireless speakers make hard to guess
+  which is what wireless speakers make hard to guess. The measured round trip has
+  the audio/video delay subtracted from it, and the background music is paused
+  while the clicks play
 - web song queue: each request is handled in its own thread, so several phones no
   longer wait for each other, and a dropped connection can no longer kill the game
   with SIGPIPE

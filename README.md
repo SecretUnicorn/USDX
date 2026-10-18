@@ -90,10 +90,15 @@ full `http://` address and is not affected.
 Wireless speakers add a lot of delay, which makes singing score badly because
 the game hears the music later than it plays it. In *Options -> Game*, `C` plays
 five short clicks and measures how long each one takes to come back through the
-microphone of player 1. The median of the five is written to *Microphone Delay*.
+microphone of player 1. That is the whole round trip, speakers plus microphone,
+so *Audio/Video Delay* is subtracted from the median before the rest is written
+to *Microphone Delay*. Set *Audio/Video Delay* first, then measure.
 
+The background music is paused while the clicks play, otherwise it masks them.
 Put the microphone where it will be sung into, keep the room quiet during the
-measurement, and redo it whenever you change speakers.
+measurement, and redo it whenever you change speakers. Repeated measurements can
+differ by up to about 50 ms because the capture buffer aligns differently each
+time; if the result looks off, run it again.
 
 ### 6. Further documentation
 The [documentation](https://usdx.eu/docs/) contains more information on:

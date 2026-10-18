@@ -280,6 +280,10 @@ begin
     Exit;
   end;
 
+  // the menu music comes out of the same speakers and would both lift the
+  // noise floor and mask the click
+  SoundLib.PauseBgMusic;
+
   // the capture is wired up per player, borrow player one for the measurement
   CalPlayers := PlayersPlay;
   PlayersPlay := 1;
@@ -313,6 +317,9 @@ begin
     AudioInput.CaptureStop;
     PlayersPlay := CalPlayers;
     CalCapturing := false;
+
+    // only resumes when the setting asks for it
+    SoundLib.StartBgMusic;
   end;
 
   CalPhase   := 0;
@@ -324,6 +331,7 @@ var
   Now, Elapsed: cardinal;
   Level: single;
   I, J, Swap: integer;
+  RoundTrip: integer;
   Line: UTF8String;
 begin
   if (CalPhase = 0) then
@@ -390,7 +398,15 @@ begin
           Line := Line + IfThen(J > 0, ', ', '') + IntToStr(CalResults[J]);
 
         // median, rounded to the 10ms steps the setting uses
-        I := Round(CalResults[Length(CalResults) div 2] / 10) * 10;
+        RoundTrip := Round(CalResults[Length(CalResults) div 2] / 10) * 10;
+
+        // The click goes out through the speakers and comes back in through the
+        // microphone, so this is the whole round trip. AVDelay already shifts
+        // the lyrics by the output half of it, and compensating for that half
+        // twice would score every note early.
+        I := RoundTrip - Ini.AVDelay;
+        if (I < 0) then
+          I := 0;
 
         Ini.MicDelay := I;
 
@@ -399,11 +415,12 @@ begin
         CalculateSelectSlide(true, @GetMicDelayOptText, Ini.MicDelay, MicDelayOptInt, IMicDelay);
         UpdateSelectSlideOptions(MicDelaySelectNum, IMicDelay, MicDelayOptInt);
 
-        Log.LogStatus(Format('Microphone delay measured as %d ms (rounds sorted: %s, noise %.2f, threshold %.2f)',
-                             [I, Line, CalNoise, CalThreshold]),
+        Log.LogStatus(Format('Round trip %d ms minus AV delay %d ms, microphone delay set to %d ms ' +
+                             '(rounds sorted: %s, noise %.2f, threshold %.2f)',
+                             [RoundTrip, Ini.AVDelay, I, Line, CalNoise, CalThreshold]),
                       'TScreenOptionsGame.UpdateCalibration');
 
-        StopCalibration(Format(Language.Translate('RECORD_CALIBRATE_RESULT'), [I]));
+        StopCalibration(Format(Language.Translate('RECORD_CALIBRATE_RESULT'), [RoundTrip, I]));
       end;
   end;
 end;
