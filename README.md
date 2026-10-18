@@ -52,7 +52,8 @@ address to open (for example `http://192.168.1.20:8080`) in the queue overlay at
 the bottom left of the screen. Everyone on the same network can open that page,
 search the song list and add songs to the queue; entries can be reordered or
 removed from the page again. Songs that carry medley in/out tags also offer a
-**SHORT** button, which queues only the tagged part of the song.
+green **½** button next to the **+**, which queues only the tagged part of the
+song; those entries are marked SHORT in the queue.
 
 If the configured port is already taken by another program, the next free port
 is used and the overlay shows the address that actually works.
