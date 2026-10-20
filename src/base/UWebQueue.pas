@@ -53,6 +53,8 @@ type
     Edition:    UTF8String;
     Year:       integer;
     Played:     integer;   // how often it has been sung, from the score database
+    PlayedToday:boolean;
+    Duration:   integer;   // seconds up to the end of the last note, 0 if unknown
     IsDuet:     boolean;
     HasMedley:  boolean;    // has medley in/out tags, so it can be sung short
     Path:       UTF8String; // full path of the txt file, used to find the song again
@@ -77,6 +79,7 @@ type
     private
       Lock:        TRTLCriticalSection;
       SongIndex:   TWebSongArray;
+      Durations:   TStringList; // song id -> seconds, so a refresh does not read every file again
       Entries:     TWebQueueEntryArray;
       NextEntryID: cardinal;
       fRevision:   cardinal; // bumped on every change so the web page can poll cheaply
@@ -93,6 +96,7 @@ type
          TCatSongs.Refresh, i.e. whenever the song list changed. *}
       procedure RebuildSongIndex;
       procedure SongPlayed(const Artist, Title: UTF8String);
+      procedure AddWish(const Wish, Singer: UTF8String);
 
       // the following methods are safe to call from the web server thread
       function  SearchSongs(const Search: UTF8String; Offset, Limit: integer;
@@ -104,6 +108,7 @@ type
       function  Enqueue(SongID: cardinal; const Singer: UTF8String; Short: boolean): boolean;
       function  RemoveEntry(EntryID: cardinal): boolean;
       function  MoveEntry(EntryID: cardinal; Offset: integer): boolean;
+      function  Shuffle: boolean;
       procedure Clear;
       function  GetEntries: TWebQueueEntryArray;
       function  Count: integer;
@@ -148,6 +153,7 @@ procedure HideWebQueueQRCode;
 implementation
 
 uses
+  DateUtils,
   Math,
   StrUtils,
   UDataBase,
@@ -159,6 +165,8 @@ uses
   UNote,
   UParty,
   UPath,
+  UPathUtils,
+  UPlatform,
   UPlaylist,
   UQRCode,
   URenderer,
@@ -270,6 +278,8 @@ begin
   inherited Create;
 
   InitCriticalSection(Lock);
+  Durations := TStringList.Create;
+  Durations.Sorted := true;
   SetLength(SongIndex, 0);
   SetLength(Entries, 0);
   NextEntryID := 1;
@@ -281,6 +291,7 @@ destructor TWebQueue.Destroy;
 begin
   SetLength(SongIndex, 0);
   SetLength(Entries, 0);
+  Durations.Free;
   DoneCriticalSection(Lock);
 
   inherited;
@@ -311,6 +322,7 @@ begin
       if (SongIndex[I].Artist = Artist) and (SongIndex[I].Title = Title) then
       begin
         Inc(SongIndex[I].Played);
+        SongIndex[I].PlayedToday := true;
         Inc(fRevision);
         Break;
       end;
@@ -332,6 +344,73 @@ begin
     end;
 end;
 
+{* Beat the last note of a song ends on. Only the tail of the file is read,
+   the note lines are at the end and a big collection is read at startup. *}
+function ReadLastNoteBeat(const TxtPath: UTF8String): integer;
+const
+  TailBytes = 8192;
+var
+  Stream: TBinaryFileStream;
+  Buffer: RawByteString;
+  Size:   int64;
+  Lines:  TStringList;
+  I, P:   integer;
+  Line:   string;
+  Parts:  TStringList;
+begin
+  Result := 0;
+
+  try
+    Stream := TBinaryFileStream.Create(Path(TxtPath), fmOpenRead);
+  except
+    Exit;
+  end;
+
+  Lines := TStringList.Create;
+  Parts := TStringList.Create;
+  try
+    Size := Stream.Size;
+    if (Size > TailBytes) then
+    begin
+      Stream.Seek(Size - TailBytes, soBeginning);
+      SetLength(Buffer, TailBytes);
+    end
+    else
+      SetLength(Buffer, Size);
+
+    if (Length(Buffer) = 0) then
+      Exit;
+
+    Stream.Read(Buffer[1], Length(Buffer));
+    Lines.Text := Buffer;
+
+    Parts.Delimiter := ' ';
+    Parts.StrictDelimiter := false;
+
+    for I := Lines.Count - 1 downto 0 do
+    begin
+      Line := Trim(Lines[I]);
+      if (Length(Line) < 2) or (Pos(Line[1], ':*FRG') = 0) or (Line[2] <> ' ') then
+        Continue;
+
+      Parts.DelimitedText := Line;
+      if (Parts.Count < 3) then
+        Continue;
+
+      P := StrToIntDef(Parts[1], -1);
+      if (P < 0) then
+        Continue;
+
+      Result := P + Max(0, StrToIntDef(Parts[2], 0));
+      Break;
+    end;
+  finally
+    Parts.Free;
+    Lines.Free;
+    Stream.Free;
+  end;
+end;
+
 procedure TWebQueue.RebuildSongIndex;
 var
   I, Count: integer;
@@ -340,7 +419,12 @@ var
   FullPath:  UTF8String;
   CoverPath: UTF8String;
   CoverFile: IPath;
+  Cached:    integer;
+  Seconds:   integer;
+  LastPlayed: int64;
+  Midnight:  int64;
 begin
+  Midnight := DateTimeToUnix(Trunc(Now));
   if (not Assigned(Songs)) or (not Assigned(Songs.SongList)) then
     Exit;
 
@@ -377,6 +461,18 @@ begin
     NewIndex[Count].Edition    := CurSong.Edition;
     NewIndex[Count].Year       := CurSong.Year;
     NewIndex[Count].Played     := DataBase.GetTimesPlayed(CurSong.Artist, CurSong.Title);
+    LastPlayed := DataBase.GetLastPlayed(CurSong.Artist, CurSong.Title);
+    NewIndex[Count].PlayedToday := (LastPlayed >= Midnight);
+
+    // the file is only read the first time a song shows up in the index
+    if Durations.Find(IntToStr(NewIndex[Count].ID), Cached) then
+      Seconds := PtrInt(Durations.Objects[Cached])
+    else
+    begin
+      Seconds := Max(0, Round(GetTimeFromBeat(ReadLastNoteBeat(FullPath), CurSong)));
+      Durations.AddObject(IntToStr(NewIndex[Count].ID), TObject(PtrInt(Seconds)));
+    end;
+    NewIndex[Count].Duration := Seconds;
     NewIndex[Count].IsDuet     := CurSong.isDuet;
     // only the explicit tags, a guessed refrain is not what the guest picked
     NewIndex[Count].HasMedley  := (CurSong.Medley.Source >= msTag);
@@ -397,6 +493,76 @@ begin
     Inc(fRevision);
   finally
     LeaveCriticalSection(Lock);
+  end;
+end;
+
+{* Levenshtein distance, stopped as soon as it is clear that it exceeds Limit. *}
+function EditDistance(const A, B: UTF8String; Limit: integer): integer;
+var
+  Prev, Cur: array of integer;
+  I, J, Best, Cost: integer;
+begin
+  if (Abs(Length(A) - Length(B)) > Limit) then
+  begin
+    Result := Limit + 1;
+    Exit;
+  end;
+
+  SetLength(Prev, Length(B) + 1);
+  SetLength(Cur, Length(B) + 1);
+  for J := 0 to Length(B) do
+    Prev[J] := J;
+
+  for I := 1 to Length(A) do
+  begin
+    Cur[0] := I;
+    Best := Cur[0];
+    for J := 1 to Length(B) do
+    begin
+      Cost := IfThen(A[I] = B[J], 0, 1);
+      Cur[J] := Min(Min(Cur[J - 1] + 1, Prev[J] + 1), Prev[J - 1] + Cost);
+      Best := Min(Best, Cur[J]);
+    end;
+
+    if (Best > Limit) then
+    begin
+      Result := Limit + 1;
+      Exit;
+    end;
+
+    Prev := Copy(Cur, 0, Length(Cur));
+  end;
+
+  Result := Prev[Length(B)];
+end;
+
+{* True if Word is close enough to one of the words in Haystack to be a typo
+   of it. Short words have to be spelled right, otherwise everything matches. *}
+function FuzzyMatch(const Haystack, Word: UTF8String): boolean;
+var
+  Words: TStringList;
+  I, Limit: integer;
+begin
+  Result := false;
+  if (Length(Word) < 4) then
+    Exit;
+
+  Limit := IfThen(Length(Word) <= 6, 1, 2);
+
+  Words := TStringList.Create;
+  try
+    Words.Delimiter := ' ';
+    Words.StrictDelimiter := true;
+    Words.DelimitedText := Haystack;
+
+    for I := 0 to Words.Count - 1 do
+      if (EditDistance(Word, Words[I], Limit) <= Limit) then
+      begin
+        Result := true;
+        Exit;
+      end;
+  finally
+    Words.Free;
   end;
 end;
 
@@ -462,7 +628,8 @@ begin
     begin
       Matched := true;
       for W := 0 to Words.Count - 1 do
-        if (Words[W] <> '') and (Pos(Words[W], SongIndex[I].SearchText) = 0) then
+        if (Words[W] <> '') and (Pos(Words[W], SongIndex[I].SearchText) = 0) and
+           (not FuzzyMatch(SongIndex[I].SearchText, Words[W])) then
         begin
           Matched := false;
           Break;
@@ -637,6 +804,118 @@ begin
   finally
     LeaveCriticalSection(Lock);
   end;
+end;
+
+function SingerCount(const Pool: TWebQueueEntryArray; const Singer: UTF8String): integer;
+var
+  I: integer;
+begin
+  Result := 0;
+  for I := 0 to High(Pool) do
+    if (Pool[I].Singer = Singer) then
+      Inc(Result);
+end;
+
+{* Shuffles the queue so that nobody sings three songs in a row. Picking the
+   singer with the most songs left is what keeps the one who requested half the
+   queue from piling up at the end; the order is still random because the pool
+   is shuffled first. *}
+function TWebQueue.Shuffle: boolean;
+var
+  Pool, Mixed: TWebQueueEntryArray;
+  Swap: TWebQueueEntry;
+  I, J, Pick, Count, Best: integer;
+begin
+  Result := false;
+
+  EnterCriticalSection(Lock);
+  try
+    if (Length(Entries) < 2) then
+      Exit;
+
+    Pool := Copy(Entries, 0, Length(Entries));
+    for I := High(Pool) downto 1 do
+    begin
+      J := Random(I + 1);
+      Swap := Pool[I]; Pool[I] := Pool[J]; Pool[J] := Swap;
+    end;
+
+    SetLength(Mixed, 0);
+    while (Length(Pool) > 0) do
+    begin
+      Pick := -1;
+      Best := -1;
+      for I := 0 to High(Pool) do
+      begin
+        if (Length(Mixed) >= 2) and
+           (Pool[I].Singer = Mixed[High(Mixed)].Singer) and
+           (Pool[I].Singer = Mixed[High(Mixed) - 1].Singer) then
+          Continue;
+
+        Count := SingerCount(Pool, Pool[I].Singer);
+        if (Count > Best) then
+        begin
+          Best := Count;
+          Pick := I;
+        end;
+      end;
+
+      // everything left is the same singer, the rule cannot be kept
+      if (Pick < 0) then
+        Pick := 0;
+
+      SetLength(Mixed, Length(Mixed) + 1);
+      Mixed[High(Mixed)] := Pool[Pick];
+
+      for I := Pick to High(Pool) - 1 do
+        Pool[I] := Pool[I + 1];
+      SetLength(Pool, Length(Pool) - 1);
+    end;
+
+    Entries := Mixed;
+    Inc(fRevision);
+    Result := true;
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+end;
+
+{* A song somebody missed in the list. Appended to a file so it can be read
+   after the party, the queue itself does not know the song. *}
+procedure TWebQueue.AddWish(const Wish, Singer: UTF8String);
+var
+  Target: IPath;
+  Line:   UTF8String;
+  Stream: TBinaryFileStream;
+begin
+  if (Trim(Wish) = '') then
+    Exit;
+
+  // next to config.ini and the score database, not in the program directory
+  Target := Platform.GetGameUserPath.Append('song-requests.txt');
+  Line := FormatDateTime('yyyy-mm-dd hh:nn', Now) + #9 +
+          IfThen(Trim(Singer) = '', '-', Trim(Singer)) + #9 + Trim(Wish) + LineEnding;
+
+  try
+    if Target.IsFile then
+    begin
+      Stream := TBinaryFileStream.Create(Target, fmOpenWrite);
+      Stream.Seek(0, soEnd);
+    end
+    else
+      Stream := TBinaryFileStream.Create(Target, fmCreate);
+  except
+    Log.LogError('Could not write ' + Target.ToNative, 'TWebQueue.AddWish');
+    Exit;
+  end;
+
+  try
+    Stream.Write(Line[1], Length(Line));
+  finally
+    Stream.Free;
+  end;
+
+  Log.LogStatus('Song request: ' + Line, 'TWebQueue.AddWish');
 end;
 
 procedure TWebQueue.Clear;

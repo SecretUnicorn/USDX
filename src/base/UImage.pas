@@ -57,7 +57,10 @@ type
 function WriteBMPImage(const FileName: IPath; Surface: PSDL_Surface): boolean;
 {$ENDIF}
 {$IFDEF HaveJPG}
-function WriteJPGImage(const FileName: IPath; Surface: PSDL_Surface; Quality: integer): boolean;
+{* BottomUp is what a screenshot read back from OpenGL looks like, an image
+   loaded from a file is the other way round. *}
+function WriteJPGImage(const FileName: IPath; Surface: PSDL_Surface; Quality: integer;
+                       BottomUp: boolean = true): boolean;
 {$ENDIF}
 
 (*******************************************************
@@ -325,7 +328,8 @@ end;
 
 {$IFDEF HaveJPG}
 
-function WriteJPGImage(const FileName: IPath; Surface: PSDL_Surface; Quality: integer): boolean;
+function WriteJPGImage(const FileName: IPath; Surface: PSDL_Surface; Quality: integer;
+                       BottomUp: boolean): boolean;
 var
   {$IFDEF Delphi}
   Bitmap:     TBitmap;
@@ -365,7 +369,8 @@ begin
     begin
       biSize := SizeOf(BITMAPINFOHEADER);
       biWidth  := Surface.w;
-      biHeight := Surface.h;
+      // a negative height marks the data as top-down
+      biHeight := IfThen(BottomUp, Surface.h, -Surface.h);
       biPlanes := 1;
       biBitCount := 24;
       biCompression := BI_RGB;
@@ -474,7 +479,10 @@ begin
     while (cinfo.next_scanline < cinfo.image_height) do
     begin
       // Note: the byte-count of a row is pitch (which is not width*bitsPerPixel if the image is aligned)
-      rowPtr[0] := JSAMPROW(@PChar(Surface.pixels)[(Surface.h-cinfo.next_scanline-1) * Surface.pitch]);
+      if BottomUp then
+        rowPtr[0] := JSAMPROW(@PChar(Surface.pixels)[(Surface.h-cinfo.next_scanline-1) * Surface.pitch])
+      else
+        rowPtr[0] := JSAMPROW(@PChar(Surface.pixels)[cinfo.next_scanline * Surface.pitch]);
       jpeg_write_scanlines(@cinfo, JSAMPARRAY(@rowPtr), 1);
     end;
 

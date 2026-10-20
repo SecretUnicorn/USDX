@@ -8,9 +8,15 @@ Unreleased
   covers as a list or grid, and the name field is kept across reloads
 - web song queue: songs with medley tags can be queued as a short version that
   sings only the tagged part
-- web song queue: the song list can be sorted by artist, title, year or how often
-  a song has been sung, in either direction, or shuffled into a random order that
-  can be reshuffled. Each entry shows how often it has been sung
+- web song queue: the song list can be sorted by artist, title, year, length or
+  how often a song has been sung, in either direction, or shuffled into a random
+  order that can be reshuffled. Each entry shows its length and how often it has
+  been sung, and is marked while it is queued or was already sung today
+- web song queue: the queue can be shuffled so that nobody sings three songs in
+  a row, the search tolerates typos, and a song that is missing from the
+  collection can be requested into song-requests.txt
+- web song queue: cover thumbnails were upside down and were never scaled down.
+  Delete the webcovers folder once to rebuild them
 - tools/merge-score-dbs.py merges the high scores and statistics of the version
   specific settings directories into one database
 - microphone delay can be measured automatically in the game options: the game

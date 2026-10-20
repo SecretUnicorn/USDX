@@ -671,6 +671,8 @@ begin
       '","genre":"' + JsonEscape(Songs[I].Genre) +
       '","year":' + IntToStr(Songs[I].Year) +
       ',"played":' + IntToStr(Songs[I].Played) +
+      ',"today":' + IfThen(Songs[I].PlayedToday, 'true', 'false') +
+      ',"secs":' + IntToStr(Songs[I].Duration) +
       ',"duet":' + IfThen(Songs[I].IsDuet, 'true', 'false') +
       ',"short":' + IfThen(Songs[I].HasMedley, 'true', 'false') + '}';
   end;
@@ -694,6 +696,7 @@ begin
 
     Result := Result +
       '{"entry":' + IntToStr(Entries[I].EntryID) +
+      ',"id":' + IntToStr(Entries[I].SongID) +
       ',"artist":"' + JsonEscape(Entries[I].Artist) +
       '","title":"' + JsonEscape(Entries[I].Title) +
       '","singer":"' + JsonEscape(Entries[I].Singer) +
@@ -713,7 +716,7 @@ end;
  *}
 function MakeCoverThumbnail(const Source, Target: IPath): boolean;
 var
-  Surface: PSDL_Surface;
+  Surface, Converted: PSDL_Surface;
   W, H:    integer;
   Scale:   real;
 begin
@@ -733,6 +736,17 @@ begin
       Exit;
 
     try
+      // ScaleImage silently does nothing for any other format, and the JPEG
+      // writer wants 24 bit as well
+      if (Surface^.format^.format <> SDL_PIXELFORMAT_RGB24) then
+      begin
+        Converted := SDL_ConvertSurfaceFormat(Surface, SDL_PIXELFORMAT_RGB24, 0);
+        if (Converted = nil) then
+          Exit;
+        SDL_FreeSurface(Surface);
+        Surface := Converted;
+      end;
+
       W := Surface^.w;
       H := Surface^.h;
       if (W <= 0) or (H <= 0) then
@@ -747,7 +761,7 @@ begin
         ScaleImage(Surface, W, H);
       end;
 
-      Result := WriteJPGImage(Target, Surface, 80);
+      Result := WriteJPGImage(Target, Surface, 80, false);
     finally
       SDL_FreeSurface(Surface);
     end;
@@ -904,6 +918,20 @@ begin
     SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
       '{"ok":' + IfThen(WebQueue.RemoveEntry(ParamToID(Body, 'entry')),
                         'true', 'false') + '}');
+    Exit;
+  end;
+
+  if (Method = 'POST') and (Target = '/api/queue/shuffle') then
+  begin
+    SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
+      '{"ok":' + IfThen(WebQueue.Shuffle, 'true', 'false') + '}');
+    Exit;
+  end;
+
+  if (Method = 'POST') and (Target = '/api/wish') then
+  begin
+    WebQueue.AddWish(GetParam(Body, 'wish'), GetParam(Body, 'singer'));
+    SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', '{"ok":true}');
     Exit;
   end;
 

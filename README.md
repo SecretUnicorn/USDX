@@ -74,12 +74,21 @@ In the game:
   ones USDX has medley data for, and `Left`/`Right` pick how many of them to
   sing. `Enter` starts, `Esc` closes. The queue itself is kept.
 
-The song list can be sorted by artist, title, year or how often a song has been
-sung, each ascending or descending, or shuffled into a random order - the random order is new on every
+The song list can be sorted by artist, title, year, length or how often a song
+has been sung, each ascending or descending, or shuffled into a random order - the random order is new on every
 page load and the button next to the selector reshuffles it, so the same songs
 do not end up on top all evening. Every entry says how often it has been sung,
 taken from the same statistics the game shows, so *Times sung* with *Least
-first* finds the songs nobody has picked yet.
+first* finds the songs nobody has picked yet. Every entry shows its length, is
+marked TODAY while it has already been sung today and QUEUED while it waits in
+the queue. The search tolerates typos, so *metalica* still finds Metallica.
+
+**Shuffle** above the queue mixes it so that nobody sings three songs in a row,
+as far as the queue allows that at all.
+
+If a song is not in the collection, searching for it offers **Request this
+song**. Requests are appended to `song-requests.txt` next to `config.ini` with
+the time and the name of whoever asked, to read through after the party.
 
 The request page can show the songs as a plain list, as a list with covers or as
 a grid of covers. Covers are scaled down once and cached in the `webcovers`

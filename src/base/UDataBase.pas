@@ -146,6 +146,7 @@ type
       procedure AddUser_Score (Song: TSong; WebID: integer; Receive_User_Score: string; Level: integer);
 
       function GetTimesPlayed(Artist, Title: UTF8String): integer;
+      function GetLastPlayed(Artist, Title: UTF8String): int64;
 
       function ReadMax_Score(Artist, Title: UTF8String; WebID, Level: integer): integer;
       function ReadMedia_Score(Artist, Title: UTF8String; WebID, Level: integer): integer;
@@ -1136,6 +1137,27 @@ begin
 
   TableData.Free;
 
+end;
+
+(**
+ * When a song was last sung, as a unix timestamp, 0 if it never was.
+ *)
+function TDataBaseSystem.GetLastPlayed(Artist, Title: UTF8String): int64;
+begin
+  Result := 0;
+
+  if not Assigned(ScoreDB) then
+    Exit;
+
+  try
+    Result := ScoreDB.GetTableValue(
+        'SELECT MAX(c.[Date]) FROM [' + cUS_Scores + '] c ' +
+        'JOIN [' + cUS_Songs + '] s ON s.[ID] = c.[SongID] ' +
+        'WHERE s.[Artist] = ? AND s.[Title] = ?',
+        [Artist, Title]);
+  except on E: Exception do
+    Log.LogError(E.Message, 'TDataBaseSystem.GetLastPlayed');
+  end;
 end;
 
 (**
