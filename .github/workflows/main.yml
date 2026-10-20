@@ -7,10 +7,20 @@ on:
   pull_request:
   # allows rebuilding this fork on demand
   workflow_dispatch:
+
+# Several pushes in a row queued several builds, and the Apple Silicon runners
+# are scarce enough that the waiting ones were cancelled after 15 minutes
+# without ever starting. Only the newest push is worth building.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build_windows:
     name: Build for Windows
     runs-on: windows-2022
+    # an installer waiting for a click would otherwise block a runner for hours
+    timeout-minutes: 30
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
@@ -33,8 +43,16 @@ jobs:
             mingw-w64-x86_64-tools
       - name: Install Dependencies
         run: |
-          curl.exe -L --max-time 60 -o fpc-installer.exe "https://sourceforge.net/projects/freepascal/files/Win32/3.2.2/fpc-3.2.2.win32.and.win64.exe/download"
-          curl.exe -L --max-time 60 -o nsis-3.05-setup.exe "https://sourceforge.net/projects/nsis/files/NSIS%203/3.05/nsis-3.05-setup.exe/download"
+          # A SourceForge mirror that crawls used to cut the 90 MB installer
+          # off after a minute. PowerShell does not stop at a failed curl, so
+          # the truncated file was started and its error dialog hung the job
+          # until the six hour limit.
+          function Fetch($url, $out) {
+            curl.exe -L --fail --retry 3 --retry-delay 5 --max-time 600 -o $out $url
+            if ($LASTEXITCODE -ne 0) { throw "downloading $out failed with exit code $LASTEXITCODE" }
+          }
+          Fetch "https://sourceforge.net/projects/freepascal/files/Win32/3.2.2/fpc-3.2.2.win32.and.win64.exe/download" "fpc-installer.exe"
+          Fetch "https://sourceforge.net/projects/nsis/files/NSIS%203/3.05/nsis-3.05-setup.exe/download" "nsis-3.05-setup.exe"
           Start-Process -FilePath ".\\fpc-installer.exe" -ArgumentList "/TYPE=full /VERYSILENT /SP- /SUPPRESSMSGBOXES /NORESTART" -Wait
           ./nsis-3.05-setup.exe /S
       - name: Download prebuilt DLLs
