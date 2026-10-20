@@ -75,11 +75,23 @@ type
   end;
   TWebQueueEntryArray = array of TWebQueueEntry;
 
+  {* One of the players of the running song, as shown on the player page. *}
+  TWebPlayer = record
+    Name:  UTF8String;
+    Color: UTF8String;  // name of the microphone colour, e.g. Red
+    RGB:   UTF8String;  // the same as #rrggbb, for the dot on the page
+    Score: integer;
+  end;
+  TWebPlayerArray = array of TWebPlayer;
+
   TWebQueue = class
     private
       Lock:        TRTLCriticalSection;
       SongIndex:   TWebSongArray;
       Durations:   TStringList; // song id -> seconds, so a refresh does not read every file again
+      PlayerInfo:  TWebPlayerArray;        // snapshot of the players, written once per frame
+      PendingName: array of UTF8String;    // names the page asked for, applied on the main thread
+      Singing:     boolean;
       Entries:     TWebQueueEntryArray;
       NextEntryID: cardinal;
       fRevision:   cardinal; // bumped on every change so the web page can poll cheaply
@@ -96,6 +108,10 @@ type
          TCatSongs.Refresh, i.e. whenever the song list changed. *}
       procedure RebuildSongIndex;
       procedure SongPlayed(const Artist, Title: UTF8String);
+
+      {* Main thread, once per frame: hands over the names the page asked for
+         and takes a snapshot of the players for it to show. *}
+      procedure UpdatePlayers;
       procedure AddWish(const Wish, Singer: UTF8String);
 
       // the following methods are safe to call from the web server thread
@@ -109,6 +125,8 @@ type
       function  RemoveEntry(EntryID: cardinal): boolean;
       function  MoveEntry(EntryID: cardinal; Offset: integer): boolean;
       function  Shuffle: boolean;
+      function  GetPlayers(out IsSinging: boolean): TWebPlayerArray;
+      function  SetPlayerName(Index: integer; const AName: UTF8String): boolean;
       procedure Clear;
       function  GetEntries: TWebQueueEntryArray;
       function  Count: integer;
@@ -156,6 +174,7 @@ uses
   DateUtils,
   Math,
   StrUtils,
+  UCommon,
   UDataBase,
   UDisplay,
   UGraphic,
@@ -169,6 +188,7 @@ uses
   UPlatform,
   UPlaylist,
   UQRCode,
+  UThemes,
   URenderer,
   sdl2,
   UScreenName,
@@ -309,6 +329,93 @@ begin
       Result := I;
       Exit;
     end;
+end;
+
+function ColorToHex(const Col: TRGB): UTF8String;
+begin
+  Result := Format('#%.2x%.2x%.2x',
+                   [Round(Col.R * 255), Round(Col.G * 255), Round(Col.B * 255)]);
+end;
+
+procedure TWebQueue.UpdatePlayers;
+var
+  I, Count, ColorNum: integer;
+  Wanted: UTF8String;
+begin
+  Count := Min(PlayersPlay, Length(Player));
+
+  EnterCriticalSection(Lock);
+  try
+    SetLength(PendingName, IMaxPlayerCount);
+    for I := 0 to Count - 1 do
+    begin
+      Wanted := PendingName[I];
+      if (Wanted <> '') then
+      begin
+        PendingName[I] := '';
+        Player[I].Name := Wanted;
+        // so the next song starts with the name as well
+        Ini.Name[I] := Wanted;
+
+        // the sing screen copies the names once when it opens
+        if Assigned(ScreenSing) and (not Party.bPartyGame) then
+        begin
+          ScreenSing.PlayerNames[I + 1] := Wanted;
+          ScreenSing.PlayerDuetNames[I + 1] := Wanted;
+        end;
+      end;
+    end;
+
+    Singing := Assigned(Display) and (Display.CurrentScreen = @ScreenSing);
+
+    SetLength(PlayerInfo, Count);
+    for I := 0 to Count - 1 do
+    begin
+      PlayerInfo[I].Name  := Player[I].Name;
+      PlayerInfo[I].Score := Player[I].ScoreTotalInt;
+
+      // the player colours have their own list, IColor is the one of the theme
+      ColorNum := Ini.PlayerColor[I];
+      if (ColorNum >= 1) and (ColorNum <= Length(IPlayerColorTranslated)) then
+        PlayerInfo[I].Color := IPlayerColorTranslated[ColorNum - 1]
+      else
+        PlayerInfo[I].Color := '';
+      PlayerInfo[I].RGB := ColorToHex(GetPlayerColor(ColorNum));
+    end;
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+end;
+
+function TWebQueue.GetPlayers(out IsSinging: boolean): TWebPlayerArray;
+begin
+  EnterCriticalSection(Lock);
+  try
+    Result := Copy(PlayerInfo, 0, Length(PlayerInfo));
+    IsSinging := Singing;
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+end;
+
+{* The name is only parked here, the main thread picks it up in UpdatePlayers. *}
+function TWebQueue.SetPlayerName(Index: integer; const AName: UTF8String): boolean;
+begin
+  Result := false;
+  if (Trim(AName) = '') then
+    Exit;
+
+  EnterCriticalSection(Lock);
+  try
+    if (Index < 0) or (Index >= Length(PlayerInfo)) then
+      Exit;
+
+    SetLength(PendingName, IMaxPlayerCount);
+    PendingName[Index] := Copy(Trim(AName), 1, 40);
+    Result := true;
+  finally
+    LeaveCriticalSection(Lock);
+  end;
 end;
 
 {* Called on the main thread when a song has been sung, so the counts on the
@@ -1247,6 +1354,9 @@ end;
 
 procedure ProcessWebQueueRequest;
 begin
+  if Assigned(WebQueue) then
+    WebQueue.UpdatePlayers;
+
   if (not StartRequested) and (not MedleyRequested) then
     Exit;
 

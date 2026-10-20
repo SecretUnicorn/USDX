@@ -103,6 +103,17 @@ the address: Chrome's "Always use secure connections" turns a typed IP into an
 `https://` address, which this server does not speak. The QR code contains the
 full `http://` address and is not affected.
 
+#### Changing the players while a song runs
+`http://<the same address>/players` is a second page for the host. It lists the
+players of the running song with the colour of their microphone, their current
+score, and a field for the name. A name typed there is applied immediately: the
+sing screen shows it, and the score at the end of the song is stored under it -
+useful when the microphones change hands mid-party. Without a running song the
+names are kept for the next one.
+
+The page is not linked from the request page, but it is not protected either,
+so anybody on the network who knows the address can rename the players.
+
 ### 5. Measuring the microphone delay
 Wireless speakers add a lot of delay, which makes singing score badly because
 the game hears the music later than it plays it. In *Options -> Game*, `C` plays

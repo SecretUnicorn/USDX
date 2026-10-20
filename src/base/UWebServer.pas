@@ -163,10 +163,12 @@ const
 
 var
   CachedPage: RawByteString = '';
+  CachedPlayersPage: RawByteString = '';
   ActiveClients: longint = 0;
   ThumbLock: TRTLCriticalSection;
 
 {$I UWebQueuePage.inc}
+{$I UWebPlayersPage.inc}
 
 { small helpers }
 
@@ -680,6 +682,31 @@ begin
   Result := Result + ']}';
 end;
 
+function PlayersToJson: RawByteString;
+var
+  Players: TWebPlayerArray;
+  Singing: boolean;
+  I: integer;
+begin
+  Players := WebQueue.GetPlayers(Singing);
+
+  Result := '{"singing":' + IfThen(Singing, 'true', 'false') + ',"players":[';
+
+  for I := 0 to High(Players) do
+  begin
+    if (I > 0) then
+      Result := Result + ',';
+
+    Result := Result +
+      '{"name":"' + JsonEscape(Players[I].Name) +
+      '","color":"' + JsonEscape(Players[I].Color) +
+      '","rgb":"' + Players[I].RGB +
+      '","score":' + IntToStr(Players[I].Score) + '}';
+  end;
+
+  Result := Result + ']}';
+end;
+
 function QueueToJson: RawByteString;
 var
   Entries: TWebQueueEntryArray;
@@ -857,6 +884,27 @@ begin
     Exit;
   end;
 
+  if (Method = 'GET') and ((Target = '/players') or (Target = '/players.html')) then
+  begin
+    SendResponse(Sock, '200 OK', 'text/html; charset=utf-8', CachedPlayersPage);
+    Exit;
+  end;
+
+  if (Method = 'GET') and (Target = '/api/players') then
+  begin
+    SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', PlayersToJson);
+    Exit;
+  end;
+
+  if (Method = 'POST') and (Target = '/api/players') then
+  begin
+    SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
+      '{"ok":' + IfThen(WebQueue.SetPlayerName(ParamToInt(Body, 'p', -1),
+                                               GetParam(Body, 'name')),
+                        'true', 'false') + '}');
+    Exit;
+  end;
+
   if (Method = 'GET') and (Target = '/api/songs') then
   begin
     Offset := ParamToInt(Query, 'offset', 0);
@@ -997,6 +1045,8 @@ begin
   // build the page once instead of lazily from whichever request gets there first
   if (CachedPage = '') then
     CachedPage := BuildWebQueuePage;
+  if (CachedPlayersPage = '') then
+    CachedPlayersPage := BuildWebPlayersPage;
 
   fPort := APort;
   fThread := TWebServerThread.Create(APort);
