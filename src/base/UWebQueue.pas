@@ -113,6 +113,7 @@ type
          and takes a snapshot of the players for it to show. *}
       procedure UpdatePlayers;
       procedure AddWish(const Wish, Singer: UTF8String);
+      function  GetWishes: UTF8String;
 
       // the following methods are safe to call from the web server thread
       function  SearchSongs(const Search: UTF8String; Offset, Limit: integer;
@@ -988,6 +989,13 @@ begin
   end;
 end;
 
+{* Tabs and line breaks would turn one wish into several lines. *}
+function OneLine(const Text: UTF8String): UTF8String;
+begin
+  Result := Trim(StringReplace(StringReplace(StringReplace(Text,
+              #13, ' ', [rfReplaceAll]), #10, ' ', [rfReplaceAll]), #9, ' ', [rfReplaceAll]));
+end;
+
 {* A song somebody missed in the list. Appended to a file so it can be read
    after the party, the queue itself does not know the song. *}
 procedure TWebQueue.AddWish(const Wish, Singer: UTF8String);
@@ -1001,9 +1009,11 @@ begin
 
   // next to config.ini and the score database, not in the program directory
   Target := Platform.GetGameUserPath.Append('song-requests.txt');
+  // one wish is one line with three fields, whatever the client sent
   Line := FormatDateTime('yyyy-mm-dd hh:nn', Now) + #9 +
-          IfThen(Trim(Singer) = '', '-', Trim(Singer)) + #9 + Trim(Wish) + LineEnding;
+          IfThen(Trim(Singer) = '', '-', OneLine(Singer)) + #9 + OneLine(Wish) + LineEnding;
 
+  EnterCriticalSection(Lock);
   try
     if Target.IsFile then
     begin
@@ -1014,6 +1024,7 @@ begin
       Stream := TBinaryFileStream.Create(Target, fmCreate);
   except
     Log.LogError('Could not write ' + Target.ToNative, 'TWebQueue.AddWish');
+    LeaveCriticalSection(Lock);
     Exit;
   end;
 
@@ -1021,9 +1032,46 @@ begin
     Stream.Write(Line[1], Length(Line));
   finally
     Stream.Free;
+    LeaveCriticalSection(Lock);
   end;
 
   Log.LogStatus('Song request: ' + Line, 'TWebQueue.AddWish');
+end;
+
+{* The whole wish file, as it is written. The page splits it into lines. *}
+function TWebQueue.GetWishes: UTF8String;
+var
+  Target: IPath;
+  Stream: TBinaryFileStream;
+  Size:   int64;
+begin
+  Result := '';
+
+  Target := Platform.GetGameUserPath.Append('song-requests.txt');
+  if not Target.IsFile then
+    Exit;
+
+  EnterCriticalSection(Lock);
+  try
+    try
+      Stream := TBinaryFileStream.Create(Target, fmOpenRead);
+    except
+      Exit;
+    end;
+
+    try
+      Size := Stream.Size;
+      if (Size <= 0) then
+        Exit;
+
+      SetLength(Result, Size);
+      Stream.Read(Result[1], Size);
+    finally
+      Stream.Free;
+    end;
+  finally
+    LeaveCriticalSection(Lock);
+  end;
 end;
 
 procedure TWebQueue.Clear;

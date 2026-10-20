@@ -164,11 +164,14 @@ const
 var
   CachedPage: RawByteString = '';
   CachedPlayersPage: RawByteString = '';
+  CachedWishesPage:  RawByteString = '';
   ActiveClients: longint = 0;
   ThumbLock: TRTLCriticalSection;
 
+{$I UWebMenu.inc}
 {$I UWebQueuePage.inc}
 {$I UWebPlayersPage.inc}
+{$I UWebWishesPage.inc}
 
 { small helpers }
 
@@ -890,6 +893,18 @@ begin
     Exit;
   end;
 
+  if (Method = 'GET') and ((Target = '/wuensche') or (Target = '/wishes')) then
+  begin
+    SendResponse(Sock, '200 OK', 'text/html; charset=utf-8', CachedWishesPage);
+    Exit;
+  end;
+
+  if (Method = 'GET') and (Target = '/api/wishes') then
+  begin
+    SendResponse(Sock, '200 OK', 'text/plain; charset=utf-8', WebQueue.GetWishes);
+    Exit;
+  end;
+
   if (Method = 'GET') and (Target = '/api/players') then
   begin
     SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', PlayersToJson);
@@ -1047,6 +1062,8 @@ begin
     CachedPage := BuildWebQueuePage;
   if (CachedPlayersPage = '') then
     CachedPlayersPage := BuildWebPlayersPage;
+  if (CachedWishesPage = '') then
+    CachedWishesPage := BuildWebWishesPage;
 
   fPort := APort;
   fThread := TWebServerThread.Create(APort);

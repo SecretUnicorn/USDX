@@ -18,6 +18,7 @@ begin
     S.Add('header{background:var(--panel);border-bottom:1px solid var(--line);padding:10px 12px;}');
     S.Add('h1{margin:0;font-size:17px;}');
     S.Add('h1 span{color:var(--accent);}');
+    AddMenuStyle(S);
     S.Add('.state{color:var(--dim);font-size:13px;margin-top:4px;}');
     S.Add('.state.live{color:var(--accent2);}');
     S.Add('main{padding:12px;max-width:620px;margin:0 auto;}');
@@ -37,7 +38,7 @@ begin
     S.Add('</style>');
     S.Add('</head><body>');
     S.Add('<header>');
-    S.Add('<h1>UltraStar <span>Deluxe</span> &middot; Players</h1>');
+    AddMenuNav(S, '/players', 'Players');
     S.Add('<div class="state" id="state">...</div>');
     S.Add('</header>');
     S.Add('<main>');

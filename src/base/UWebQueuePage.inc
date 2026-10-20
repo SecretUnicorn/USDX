@@ -25,6 +25,7 @@ begin
     S.Add('header{position:sticky;top:0;z-index:5;background:var(--panel);border-bottom:1px solid var(--line);padding:10px 12px 12px;}');
     S.Add('h1{margin:0 0 8px;font-size:17px;letter-spacing:.02em;}');
     S.Add('h1 span{color:var(--accent);}');
+    AddMenuStyle(S);
     S.Add('.row{display:flex;gap:8px;}');
     S.Add('input[type=text],input[type=search]{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:11px 12px;font-size:16px;}');
     S.Add('input::placeholder{color:var(--dim);}');
@@ -93,7 +94,7 @@ begin
     S.Add('</head>');
     S.Add('<body>');
     S.Add('<header>');
-    S.Add('<h1>UltraStar <span>Deluxe</span> &middot; Song Requests</h1>');
+    AddMenuNav(S, '/', 'Song requests');
     S.Add('<div class="row">');
     S.Add('<input id="singer" type="text" placeholder="Your name" maxlength="40" autocomplete="name" required>');
     S.Add('</div>');

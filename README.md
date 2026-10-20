@@ -88,7 +88,16 @@ as far as the queue allows that at all.
 
 If a song is not in the collection, searching for it offers **Request this
 song**. Requests are appended to `song-requests.txt` next to `config.ini` with
-the time and the name of whoever asked, to read through after the party.
+the time and the name of whoever asked, and are listed newest first on
+`/wuensche`.
+
+The server has three pages, and the title of each is a menu to the other two:
+
+| Page | What it is for |
+|---|---|
+| `/` | the song list and the queue, for the guests |
+| `/players` | who sings on which microphone, while a song runs |
+| `/wuensche` | the songs guests asked for that are not in the collection |
 
 The request page can show the songs as a plain list, as a list with covers or as
 a grid of covers. Covers are scaled down once and cached in the `webcovers`
@@ -111,8 +120,8 @@ sing screen shows it, and the score at the end of the song is stored under it -
 useful when the microphones change hands mid-party. Without a running song the
 names are kept for the next one.
 
-The page is not linked from the request page, but it is not protected either,
-so anybody on the network who knows the address can rename the players.
+Neither this page nor the wish list is protected, so anybody on the network can
+reach them through the menu.
 
 ### 5. Measuring the microphone delay
 Wireless speakers add a lot of delay, which makes singing score badly because

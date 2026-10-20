@@ -15,6 +15,8 @@ Unreleased
 - web song queue: the queue can be shuffled so that nobody sings three songs in
   a row, the search tolerates typos, and a song that is missing from the
   collection can be requested into song-requests.txt
+- the web server shows the songs guests asked for at /wuensche, and the title
+  of every page is a menu to the other pages
 - the web server offers a second page at /players where the names of the
   players can be changed while a song is running, so a score ends up under the
   name of whoever actually sang. It shows the colour of each microphone and the
