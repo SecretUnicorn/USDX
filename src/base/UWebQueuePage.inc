@@ -42,6 +42,7 @@ begin
     S.Add('.sub{color:var(--dim);font-size:13px;display:flex;align-items:center;min-width:0;margin-top:2px;}');
     S.Add('.sub .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}');
     S.Add('.sub .count{flex:none;white-space:pre;}');
+    S.Add('.sub .count::before{content:" · ";}');
     S.Add('.pos{color:var(--accent);font-weight:700;min-width:22px;text-align:center;}');
     S.Add('button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:15px;cursor:pointer;}');
     S.Add('button:active{transform:scale(.96);}');
@@ -63,7 +64,13 @@ begin
     S.Add('.views button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#241d00;font-weight:700;}');
     S.Add('.mini{padding:5px 10px;font-size:12px;border-radius:7px;}');
     S.Add('.tag.today{color:var(--accent);}');
-    S.Add('.tag.inq{color:#241d00;background:var(--accent);}');
+    S.Add('.queued{flex:none;color:var(--accent);font-weight:700;font-size:12px;letter-spacing:.06em;}');
+    S.Add('#songs.view-grid .title{flex-wrap:wrap;justify-content:center;}');
+    // the artist has no room next to the numbers in a tile, so let it wrap
+    S.Add('#songs.view-grid .sub{flex-wrap:wrap;justify-content:center;}');
+    S.Add('#songs.view-grid .sub .t{white-space:normal;}');
+    S.Add('#songs.view-grid .sub .count::before{content:"";}');
+    S.Add('#songs.view-grid .queued{width:100%;text-align:center;padding:9px 0;}');
     S.Add('.covermeta{display:none;}');
     S.Add('#songs.view-grid li{position:relative;}');
     S.Add('#songs.view-grid .covermeta{display:block;position:absolute;top:14px;left:14px;');
@@ -161,12 +168,15 @@ begin
     S.Add('function mmss(secs){return secs>0?Math.floor(secs/60)+":"+("0"+(secs%60)).slice(-2):"";}');
     S.Add('function markQueued(){');
     S.Add('Array.prototype.forEach.call(elSongs.querySelectorAll("li[data-id]"),function(li){');
-    S.Add('li.querySelector(".tag.inq").hidden=!queued[li.dataset.id];});}');
+    S.Add('var inq=!!queued[li.dataset.id];');
+    S.Add('li.querySelector(".btns").hidden=inq;');
+    S.Add('li.querySelector(".queued").hidden=!inq;});}');
     S.Add('function songRow(s){');
     S.Add('var li=document.createElement("li");li.dataset.id=s.id;');
     S.Add('if(view!=="list"){');
     S.Add('var img=document.createElement("img");img.className="cover";img.loading="lazy";img.alt="";');
-    S.Add('img.src="/api/cover?id="+s.id;');
+    // v=2 so phones that cached the upside down thumbnails fetch them again
+    S.Add('img.src="/api/cover?id="+s.id+"&v=2";');
     S.Add('img.onerror=function(){img.style.visibility="hidden";};');
     S.Add('li.appendChild(img);');
     S.Add('var over=[];if(s.year){over.push(s.year);}if(s.secs){over.push(mmss(s.secs));}');
@@ -178,14 +188,12 @@ begin
     S.Add('if(s.duet){var d=document.createElement("span");d.className="tag";d.textContent="DUET";t.appendChild(d);}');
     S.Add('if(s.today){var td=document.createElement("span");td.className="tag today";');
     S.Add('td.textContent="TODAY";td.title="Already sung today";t.appendChild(td);}');
-    S.Add('var iq=document.createElement("span");iq.className="tag inq";iq.textContent="QUEUED";');
-    S.Add('iq.hidden=!queued[s.id];t.appendChild(iq);');
     S.Add('var sub=document.createElement("div");sub.className="sub";');
     S.Add('var bits=[s.artist];if(s.year){bits.push(s.year);}if(s.language){bits.push(s.language);}');
     S.Add('var sn=document.createElement("span");sn.className="t";sn.textContent=bits.join(" · ");');
     S.Add('var cn=document.createElement("span");cn.className="count";');
-    S.Add('cn.textContent=(s.secs?" · "+mmss(s.secs):"")+');
-    S.Add('" · "+(s.played?"sung "+s.played+"\u00d7":"never sung");');
+    S.Add('cn.textContent=(s.secs?mmss(s.secs)+" · ":"")+');
+    S.Add('(s.played?"sung "+s.played+"\u00d7":"never sung");');
     S.Add('sub.appendChild(sn);sub.appendChild(cn);');
     S.Add('meta.appendChild(t);meta.appendChild(sub);');
     S.Add('var b=document.createElement("button");b.className="add";b.textContent="+";');
@@ -214,7 +222,9 @@ begin
     S.Add('if(res.ok){toast("Queued short: "+s.title);loadQueue(true);}else{toast(res.error||"Could not queue song");}');
     S.Add('}).catch(function(){sb.disabled=false;toast("Connection lost");});};');
     S.Add('btns.appendChild(sb);}');
-    S.Add('li.appendChild(meta);li.appendChild(btns);return li;}');
+    S.Add('var qd=document.createElement("span");qd.className="queued";qd.textContent="QUEUED";');
+    S.Add('btns.hidden=!!queued[s.id];qd.hidden=!queued[s.id];');
+    S.Add('li.appendChild(meta);li.appendChild(btns);li.appendChild(qd);return li;}');
     S.Add('function queueRow(e,i,len){');
     S.Add('var li=document.createElement("li");if(i===0){li.className="now";}');
     S.Add('var pos=document.createElement("div");pos.className="pos";pos.textContent=(i+1);');
