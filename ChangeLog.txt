@@ -15,6 +15,8 @@ Unreleased
 - web song queue: the queue can be shuffled so that nobody sings three songs in
   a row, the search tolerates typos, and a song that is missing from the
   collection can be requested into song-requests.txt
+- web song queue: queue entries that are too long for the in-game overlay
+  scroll sideways, so the name of whoever requested a song stays readable
 - web song queue: cover thumbnails were upside down and were never scaled down.
   Delete the webcovers folder once to rebuild them
 - tools/merge-score-dbs.py merges the high scores and statistics of the version

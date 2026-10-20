@@ -170,6 +170,7 @@ uses
   UPlaylist,
   UQRCode,
   URenderer,
+  sdl2,
   UScreenName,
   UScreenSong,
   USong,
@@ -1353,6 +1354,68 @@ begin
   Result := Copy(Result, 1, Len) + '...';
 end;
 
+{* A line that does not fit scrolls sideways and back, so the singer name at
+   the end of a long entry can be read. Scrolling by whole characters keeps
+   this to plain string work, no clipping needed. *}
+function ScrollToWidth(const Text: UTF8String; MaxWidth: real): UTF8String;
+var
+  Starts: array of integer; // byte index of every character start
+  I, MaxCut, Cut, Len: integer;
+  T, Travel, Rest, Cycle: cardinal;
+const
+  // how long the line rests at each end, and per character on the way
+  RestMs = 1500;
+  StepMs = 140;
+begin
+  Result := Text;
+  if (TextWidth(Result) <= MaxWidth) then
+    Exit;
+
+  SetLength(Starts, 0);
+  for I := 1 to Length(Text) do
+    if (Ord(Text[I]) and $C0 <> $80) then
+    begin
+      SetLength(Starts, Length(Starts) + 1);
+      Starts[High(Starts)] := I;
+    end;
+
+  // characters that have to go before the end of the line fits
+  MaxCut := 0;
+  while (MaxCut < High(Starts)) and
+        (TextWidth(Copy(Text, Starts[MaxCut], MaxInt)) > MaxWidth) do
+    Inc(MaxCut);
+
+  if (MaxCut = 0) then
+    Exit;
+
+  Rest   := RestMs;
+  Travel := Max(600, cardinal(MaxCut) * StepMs);
+  Cycle  := 2 * (Rest + Travel);
+  T      := SDL_GetTicks mod Cycle;
+
+  if (T < Rest) then
+    Cut := 0
+  else if (T < Rest + Travel) then
+    Cut := Round(MaxCut * (T - Rest) / Travel)
+  else if (T < 2 * Rest + Travel) then
+    Cut := MaxCut
+  else
+    Cut := MaxCut - Round(MaxCut * (T - 2 * Rest - Travel) / Travel);
+
+  Result := Copy(Text, Starts[Cut], MaxInt);
+
+  // whatever still sticks out on the right is cut, the movement shows there
+  // is more to come
+  Len := Length(Result);
+  while (Len > 1) and (TextWidth(Copy(Result, 1, Len)) > MaxWidth) do
+  begin
+    Dec(Len);
+    while (Len > 1) and (Ord(Result[Len + 1]) and $C0 = $80) do
+      Dec(Len);
+  end;
+  Result := Copy(Result, 1, Len);
+end;
+
 {* The queue panel in the lower left corner. *}
 procedure DrawQueuePanel;
 var
@@ -1433,7 +1496,7 @@ begin
         Line := Line + ' [' + CachedEntries[I].Singer + ']';
 
       SetFontPos(PanelX + 6, LineY);
-      PrintText(TruncateToWidth(Line, PanelW - 12));
+      PrintText(ScrollToWidth(Line, PanelW - 12));
       LineY := LineY + LineHeight;
     end;
 
