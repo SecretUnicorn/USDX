@@ -120,13 +120,23 @@ the address: Chrome's "Always use secure connections" turns a typed IP into an
 `https://` address, which this server does not speak. The QR code contains the
 full `http://` address and is not affected.
 
-#### Changing the players while a song runs
-`http://<the same address>/players` is a second page for the host. It lists the
-players of the running song with the colour of their microphone, their current
-score, and a field for the name. A name typed there is applied immediately: the
-sing screen shows it, and the score at the end of the song is stored under it -
-useful when the microphones change hands mid-party. Without a running song the
-names are kept for the next one.
+#### Who sings on which microphone
+`http://<the same address>/players` is a second page for the host. It shows one
+card per microphone in the colour of that microphone, with the singer's photo,
+name and current score.
+
+Tapping a card asks who is on that microphone and offers the singers saved so
+far; tapping one hands the microphone over right away. **Add someone** saves a
+new singer with an optional photo, taken with the phone camera or picked from
+its library. The photo is scaled to 256 pixels in the browser before it is sent,
+and the singers are kept in the `webplayers` folder next to `config.ini`, so
+they are still there at the next party.
+
+A change is applied immediately: the sing screen shows the new name, and the
+score at the end of the song is stored under it - useful when the microphones
+change hands mid-party. Without a running song the names are kept for the next
+one. The photo appears on the score screen and in the following song, because
+the sing screen takes its pictures when it opens.
 
 Neither this page nor the wish list is protected, so anybody on the network can
 reach them through the menu.

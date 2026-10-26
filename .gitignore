@@ -59,6 +59,8 @@ ppaslink.sh
 /game/screenshots/
 /game/webcovers/
 /game/song-requests.txt
+/game/song-queue.txt
+/game/webplayers/
 /game/songs/
 
 # game files

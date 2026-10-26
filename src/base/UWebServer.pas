@@ -71,6 +71,7 @@ type
       procedure SendResponse(Sock: longint; const Status, ContentType: RawByteString;
                              const Body: RawByteString; const CacheControl: RawByteString = 'no-store');
       procedure SendCover(Sock: longint; SongID: cardinal);
+      procedure SendPhoto(Sock: longint; ID: cardinal);
       procedure Route(Sock: longint; const Method, RequestPath, Body: RawByteString);
     protected
       procedure Execute; override;
@@ -132,7 +133,8 @@ uses
 const
   // a request that is not complete after this many bytes is dropped
   MaxRequestSize = 16 * 1024;
-  MaxBodySize    = 8 * 1024;
+  // a scaled down photo arrives base64 encoded in the body
+  MaxBodySize    = 256 * 1024;
   // clients that stop talking to us must not block the whole server
   ClientTimeoutMs = 3000;
   // if the configured port is taken, try a few of the following ones
@@ -704,9 +706,31 @@ begin
       '{"name":"' + JsonEscape(Players[I].Name) +
       '","color":"' + JsonEscape(Players[I].Color) +
       '","rgb":"' + Players[I].RGB +
-      '","score":' + IntToStr(Players[I].Score) + '}';
+      '","score":' + IntToStr(Players[I].Score) +
+      ',"photo":' + IntToStr(Players[I].Photo) + '}';
   end;
 
+  Result := Result + ']}';
+end;
+
+function RosterToJson: RawByteString;
+var
+  Roster: TWebRosterArray;
+  I: integer;
+begin
+  Roster := WebQueue.GetRoster;
+
+  Result := '{"players":[';
+  for I := 0 to High(Roster) do
+  begin
+    if (I > 0) then
+      Result := Result + ',';
+
+    Result := Result +
+      '{"id":' + IntToStr(Roster[I].ID) +
+      ',"name":"' + JsonEscape(Roster[I].Name) +
+      '","photo":' + IfThen(Roster[I].HasPhoto, 'true', 'false') + '}';
+  end;
   Result := Result + ']}';
 end;
 
@@ -857,6 +881,22 @@ begin
   SendResponse(Sock, '200 OK', 'image/jpeg', Data, 'public, max-age=86400');
 end;
 
+procedure TWebServerThread.SendPhoto(Sock: longint; ID: cardinal);
+var
+  Photo: UTF8String;
+  Data:  RawByteString;
+begin
+  Photo := WebQueue.RosterPhoto(ID);
+
+  if (Photo = '') or (not ReadFileBytes(Path(Photo), Data)) then
+  begin
+    SendResponse(Sock, '404 Not Found', 'text/plain; charset=utf-8', 'no photo');
+    Exit;
+  end;
+
+  SendResponse(Sock, '200 OK', 'image/jpeg', Data);
+end;
+
 procedure TWebServerThread.Route(Sock: longint; const Method, RequestPath, Body: RawByteString);
 var
   Target, Query: RawByteString;
@@ -902,6 +942,43 @@ begin
   if (Method = 'GET') and (Target = '/api/wishes') then
   begin
     SendResponse(Sock, '200 OK', 'text/plain; charset=utf-8', WebQueue.GetWishes);
+    Exit;
+  end;
+
+  if (Method = 'GET') and (Target = '/api/roster') then
+  begin
+    SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', RosterToJson);
+    Exit;
+  end;
+
+  if (Method = 'GET') and (Target = '/api/roster/photo') then
+  begin
+    SendPhoto(Sock, ParamToID(Query, 'id'));
+    Exit;
+  end;
+
+  if (Method = 'POST') and (Target = '/api/roster/add') then
+  begin
+    SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
+      '{"id":' + IntToStr(WebQueue.AddRosterEntry(GetParam(Body, 'name'),
+                                                  GetParam(Body, 'photo'))) + '}');
+    Exit;
+  end;
+
+  if (Method = 'POST') and (Target = '/api/roster/delete') then
+  begin
+    SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
+      '{"ok":' + IfThen(WebQueue.DeleteRosterEntry(ParamToID(Body, 'id')),
+                        'true', 'false') + '}');
+    Exit;
+  end;
+
+  if (Method = 'POST') and (Target = '/api/roster/assign') then
+  begin
+    SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
+      '{"ok":' + IfThen(WebQueue.AssignRoster(ParamToInt(Body, 'p', -1),
+                                              ParamToID(Body, 'id')),
+                        'true', 'false') + '}');
     Exit;
   end;
 

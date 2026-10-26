@@ -81,8 +81,18 @@ type
     Color: UTF8String;  // name of the microphone colour, e.g. Red
     RGB:   UTF8String;  // the same as #rrggbb, for the dot on the page
     Score: integer;
+    Photo: cardinal;    // roster entry whose photo this player wears, 0 for none
   end;
   TWebPlayerArray = array of TWebPlayer;
+
+  {* A singer the host saved, so a name and a face do not have to be typed
+     in again at the next party. *}
+  TWebRosterEntry = record
+    ID:       cardinal;
+    Name:     UTF8String;
+    HasPhoto: boolean;
+  end;
+  TWebRosterArray = array of TWebRosterEntry;
 
   TWebQueue = class
     private
@@ -91,6 +101,8 @@ type
       Durations:   TStringList; // song id -> seconds, so a refresh does not read every file again
       PlayerInfo:  TWebPlayerArray;        // snapshot of the players, written once per frame
       PendingName: array of UTF8String;    // names the page asked for, applied on the main thread
+      PendingPhoto: array of UTF8String;   // avatar files to load, same handover
+      SlotRoster:  array of cardinal;      // which saved singer sits on which microphone
       Singing:     boolean;
       SavedRevision: cardinal; // revision the queue file was written for
       Entries:     TWebQueueEntryArray;
@@ -134,6 +146,13 @@ type
       function  Shuffle: boolean;
       function  GetPlayers(out IsSinging: boolean): TWebPlayerArray;
       function  SetPlayerName(Index: integer; const AName: UTF8String): boolean;
+
+      // the saved singers, their photos live next to the roster file
+      function  GetRoster: TWebRosterArray;
+      function  AddRosterEntry(const AName, PhotoBase64: UTF8String): cardinal;
+      function  DeleteRosterEntry(ID: cardinal): boolean;
+      function  RosterPhoto(ID: cardinal): UTF8String;
+      function  AssignRoster(Index: integer; ID: cardinal): boolean;
       procedure Clear;
       function  GetEntries: TWebQueueEntryArray;
       function  Count: integer;
@@ -186,6 +205,8 @@ uses
   DateUtils,
   Math,
   StrUtils,
+  base64,
+  UAvatars,
   UCommon,
   UDataBase,
   UDisplay,
@@ -435,18 +456,35 @@ var
   I, Count, ColorNum: integer;
   Wanted: UTF8String;
 begin
-  Count := Min(PlayersPlay, Length(Player));
+  // before the first song there is no Player array yet, but the microphones
+  // the game is configured for can already be handed out
+  if (Ini.Players = 4) then
+    Count := 6
+  else
+    Count := Ini.Players + 1;
+  Count := Min(Max(Count, Length(Player)), IMaxPlayerCount);
 
   EnterCriticalSection(Lock);
   try
     SetLength(PendingName, IMaxPlayerCount);
     for I := 0 to Count - 1 do
     begin
+      SetLength(PendingPhoto, IMaxPlayerCount);
+      if (PendingPhoto[I] <> '') then
+      begin
+        if (PendingPhoto[I] = '-') then
+          AvatarPlayerTextures[I + 1] := NoAvatarTexture[I + 1]
+        else
+          AvatarPlayerTextures[I + 1] := Renderer.LoadTexture(Path(PendingPhoto[I]));
+        PendingPhoto[I] := '';
+      end;
+
       Wanted := PendingName[I];
       if (Wanted <> '') then
       begin
         PendingName[I] := '';
-        Player[I].Name := Wanted;
+        if (I < Length(Player)) then
+          Player[I].Name := Wanted;
         // so the next song starts with the name as well
         Ini.Name[I] := Wanted;
 
@@ -464,8 +502,19 @@ begin
     SetLength(PlayerInfo, Count);
     for I := 0 to Count - 1 do
     begin
-      PlayerInfo[I].Name  := Player[I].Name;
-      PlayerInfo[I].Score := Player[I].ScoreTotalInt;
+      if (I < Length(Player)) then
+      begin
+        PlayerInfo[I].Name  := Player[I].Name;
+        PlayerInfo[I].Score := Player[I].ScoreTotalInt;
+      end
+      else
+      begin
+        PlayerInfo[I].Name  := Ini.Name[I];
+        PlayerInfo[I].Score := 0;
+      end;
+
+      SetLength(SlotRoster, IMaxPlayerCount);
+      PlayerInfo[I].Photo := SlotRoster[I];
 
       // the player colours have their own list, IColor is the one of the theme
       ColorNum := Ini.PlayerColor[I];
@@ -489,6 +538,242 @@ begin
   finally
     LeaveCriticalSection(Lock);
   end;
+end;
+
+{* Tabs and line breaks would turn one entry into several lines. *}
+function OneLine(const Text: UTF8String): UTF8String;
+begin
+  Result := Trim(StringReplace(StringReplace(StringReplace(Text,
+              #13, ' ', [rfReplaceAll]), #10, ' ', [rfReplaceAll]), #9, ' ', [rfReplaceAll]));
+end;
+
+function RosterDir: IPath;
+begin
+  Result := Platform.GetGameUserPath.Append('webplayers');
+  if not Result.IsDirectory then
+    Result.CreateDirectory(true);
+end;
+
+function RosterFile: IPath;
+begin
+  Result := RosterDir.Append('roster.txt');
+end;
+
+function TWebQueue.RosterPhoto(ID: cardinal): UTF8String;
+var
+  Photo: IPath;
+begin
+  Result := '';
+  Photo := RosterDir.Append(IntToStr(ID) + '.jpg');
+  if Photo.IsFile then
+    Result := Photo.ToUTF8;
+end;
+
+function TWebQueue.GetRoster: TWebRosterArray;
+var
+  Lines, Fields: TStringList;
+  I, Len: integer;
+begin
+  SetLength(Result, 0);
+  if not RosterFile.IsFile then
+    Exit;
+
+  Lines  := TStringList.Create;
+  Fields := TStringList.Create;
+  EnterCriticalSection(Lock);
+  try
+    try
+      Lines.LoadFromFile(RosterFile.ToNative);
+    except
+      Exit;
+    end;
+
+    Fields.Delimiter := #9;
+    Fields.StrictDelimiter := true;
+
+    for I := 0 to Lines.Count - 1 do
+    begin
+      if (Trim(Lines[I]) = '') then
+        Continue;
+
+      Fields.DelimitedText := Lines[I];
+      if (Fields.Count < 2) then
+        Continue;
+
+      Len := Length(Result);
+      SetLength(Result, Len + 1);
+      Result[Len].ID       := StrToIntDef(Fields[0], 0);
+      Result[Len].Name     := Fields[1];
+      Result[Len].HasPhoto := RosterPhoto(Result[Len].ID) <> '';
+    end;
+  finally
+    LeaveCriticalSection(Lock);
+    Fields.Free;
+    Lines.Free;
+  end;
+end;
+
+{* Writes the roster back. The lock is expected to be held. *}
+procedure WriteRoster(const Roster: TWebRosterArray);
+var
+  Lines: TStringList;
+  I: integer;
+begin
+  Lines := TStringList.Create;
+  try
+    for I := 0 to High(Roster) do
+      Lines.Add(IntToStr(Roster[I].ID) + #9 + OneLine(Roster[I].Name));
+
+    try
+      Lines.SaveToFile(RosterFile.ToNative);
+    except
+      Log.LogError('Could not write ' + RosterFile.ToNative, 'WriteRoster');
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
+{* The photo arrives as base64 from the page, which saves the server from
+   having to understand multipart uploads. *}
+function TWebQueue.AddRosterEntry(const AName, PhotoBase64: UTF8String): cardinal;
+var
+  Roster: TWebRosterArray;
+  I, Len: integer;
+  Raw:    RawByteString;
+  Stream: TBinaryFileStream;
+  Source: TStringStream;
+  Decoder: TBase64DecodingStream;
+begin
+  Result := 0;
+  if (Trim(AName) = '') then
+    Exit;
+
+  Roster := GetRoster;
+
+  EnterCriticalSection(Lock);
+  try
+    for I := 0 to High(Roster) do
+      if (Roster[I].ID >= Result) then
+        Result := Roster[I].ID + 1;
+    if (Result = 0) then
+      Result := 1;
+
+    Len := Length(Roster);
+    SetLength(Roster, Len + 1);
+    Roster[Len].ID   := Result;
+    Roster[Len].Name := OneLine(AName);
+    WriteRoster(Roster);
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+
+  if (PhotoBase64 = '') then
+    Exit;
+
+  Source := TStringStream.Create(PhotoBase64);
+  try
+    Decoder := TBase64DecodingStream.Create(Source);
+    try
+      SetLength(Raw, Decoder.Size);
+      if (Length(Raw) > 0) then
+        Decoder.Read(Raw[1], Length(Raw));
+    finally
+      Decoder.Free;
+    end;
+  finally
+    Source.Free;
+  end;
+
+  if (Length(Raw) = 0) then
+    Exit;
+
+  try
+    Stream := TBinaryFileStream.Create(RosterDir.Append(IntToStr(Result) + '.jpg'), fmCreate);
+    try
+      Stream.Write(Raw[1], Length(Raw));
+    finally
+      Stream.Free;
+    end;
+  except
+    Log.LogError('Could not write the photo of ' + AName, 'TWebQueue.AddRosterEntry');
+  end;
+end;
+
+function TWebQueue.DeleteRosterEntry(ID: cardinal): boolean;
+var
+  Roster, Kept: TWebRosterArray;
+  I: integer;
+  Photo: IPath;
+begin
+  Result := false;
+  Roster := GetRoster;
+
+  SetLength(Kept, 0);
+  for I := 0 to High(Roster) do
+    if (Roster[I].ID = ID) then
+      Result := true
+    else
+    begin
+      SetLength(Kept, Length(Kept) + 1);
+      Kept[High(Kept)] := Roster[I];
+    end;
+
+  if not Result then
+    Exit;
+
+  EnterCriticalSection(Lock);
+  try
+    WriteRoster(Kept);
+
+    // a microphone that wore this face goes back to its colour
+    SetLength(SlotRoster, IMaxPlayerCount);
+    SetLength(PendingPhoto, IMaxPlayerCount);
+    for I := 0 to High(SlotRoster) do
+      if (SlotRoster[I] = ID) then
+      begin
+        SlotRoster[I]   := 0;
+        PendingPhoto[I] := '-';
+      end;
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+
+  Photo := RosterDir.Append(IntToStr(ID) + '.jpg');
+  if Photo.IsFile then
+    Photo.DeleteFile;
+end;
+
+{* Puts a saved singer on a microphone: the name and the photo are handed to
+   the main thread, which is the only one allowed to touch textures. *}
+function TWebQueue.AssignRoster(Index: integer; ID: cardinal): boolean;
+var
+  Roster: TWebRosterArray;
+  I: integer;
+begin
+  Result := false;
+  Roster := GetRoster;
+
+  for I := 0 to High(Roster) do
+    if (Roster[I].ID = ID) then
+    begin
+      if not SetPlayerName(Index, Roster[I].Name) then
+        Exit;
+
+      EnterCriticalSection(Lock);
+      try
+        SetLength(PendingPhoto, IMaxPlayerCount);
+        SetLength(SlotRoster, IMaxPlayerCount);
+        // an empty entry means "nothing to do", a dash means "back to the colour"
+        PendingPhoto[Index] := IfThen(Roster[I].HasPhoto, RosterPhoto(ID), '-');
+        SlotRoster[Index]   := IfThen(Roster[I].HasPhoto, ID, 0);
+      finally
+        LeaveCriticalSection(Lock);
+      end;
+
+      Result := true;
+      Exit;
+    end;
 end;
 
 {* The name is only parked here, the main thread picks it up in UpdatePlayers. *}
@@ -1108,13 +1393,6 @@ begin
   finally
     LeaveCriticalSection(Lock);
   end;
-end;
-
-{* Tabs and line breaks would turn one entry into several lines. *}
-function OneLine(const Text: UTF8String): UTF8String;
-begin
-  Result := Trim(StringReplace(StringReplace(StringReplace(Text,
-              #13, ' ', [rfReplaceAll]), #10, ' ', [rfReplaceAll]), #9, ' ', [rfReplaceAll]));
 end;
 
 function QueueFile: IPath;
