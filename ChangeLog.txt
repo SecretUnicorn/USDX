@@ -15,6 +15,9 @@ Unreleased
 - web song queue: the queue can be shuffled so that nobody sings three songs in
   a row, the search tolerates typos, and a song that is missing from the
   collection can be requested into song-requests.txt
+- a song that is missing from the collection can be searched in a running USDB
+  Syncer and downloaded from the request page, after which it is read in and
+  can be sung right away ([WebQueue] Syncer in config.ini)
 - songs that appear in the song folders while the game runs can be read in from
   the request page, no restart needed
 - the song queue survives a restart, and Ctrl+E shows it full screen with keys

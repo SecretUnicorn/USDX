@@ -116,6 +116,10 @@ type
        thread, so a song downloaded during the party can be sung right away
        without starting the game again. Returns how many were added. *}
     function LoadNewSongs: integer;
+
+    {* Rebuilds the covers of the song screen. Costs about as much as a start
+       up, so it runs after the caller has reported the new songs. *}
+    procedure RefreshSongScreen;
   procedure FindFilesByExtension(const Dir: IPath; const Ext: IPath; Recursive: Boolean; var Files: TPathDynArray);
     procedure Sort(Order: TSortingType);
     property  Processing: boolean read fProcessing;
@@ -355,6 +359,15 @@ begin
   Resume();
 end;
 
+procedure TSongs.RefreshSongScreen;
+begin
+  if Assigned(ScreenSong) then
+  begin
+    ScreenSong.GenerateThumbnails();
+    ScreenSong.OnShow;
+  end;
+end;
+
 function TSongs.LoadNewSongs: integer;
 var
   SongFiles: TPathDynArray;
@@ -393,11 +406,6 @@ begin
         CatSongs.Refresh;
       if Assigned(CatCovers) then
         CatCovers.Load;
-      if Assigned(ScreenSong) then
-      begin
-        ScreenSong.GenerateThumbnails();
-        ScreenSong.OnShow;
-      end;
     end;
   finally
     SetLength(SongFiles, 0);

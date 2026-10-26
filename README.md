@@ -58,6 +58,24 @@ song; those entries are marked SHORT in the queue.
 The queue survives a restart: it is kept in `song-queue.txt` next to
 `config.ini` and read back when the game starts.
 
+#### Downloading a missing song from USDB
+If the [USDB Syncer](https://github.com/bohning/usdb_syncer) runs on the same
+machine with its web server switched on, point the game at it:
+```ini
+  [WebQueue]
+  Syncer=http://127.0.0.1:5000
+```
+A search that finds nothing in the collection then also asks the syncer, and
+what it offers is listed under *Not in the collection - from USDB* with a
+**Download** button. The game starts the download in the syncer, waits for it
+to finish, reads the new song in and says when it can be sung - all from the
+phone, without touching the host machine.
+
+In the syncer's web server settings, *show songs that are not downloaded* and
+*allow downloading* have to be on, otherwise it only offers what is already
+there. The phones never talk to the syncer themselves, the game asks it for
+them.
+
 **Look for new songs** above the song list reads songs that appeared in the
 song folders while the game was running, so a song downloaded during the party
 can be sung without starting the game again. Only new songs are read, which

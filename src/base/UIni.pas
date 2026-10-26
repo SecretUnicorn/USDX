@@ -236,6 +236,7 @@ type
       WebQueueOverlay: integer;    // show the queue in-game
       WebQueuePort:    integer;
       WebQueueAddress: UTF8String; // host shown in-game, empty: detect it
+      WebQueueSyncer:  UTF8String; // USDB Syncer web server, empty: no USDB search
 
       // WebCam
       WebCamID:         integer;
@@ -1758,6 +1759,7 @@ begin
   if (WebQueuePort < 1) or (WebQueuePort > 65535) then
     WebQueuePort := IWebQueuePortDefault;
   WebQueueAddress := Trim(IniFile.ReadString('WebQueue', 'Address', ''));
+  WebQueueSyncer  := Trim(IniFile.ReadString('WebQueue', 'Syncer', ''));
 
   // WebCam
   WebCamID := IniFile.ReadInteger('Webcam', 'ID', 0);
@@ -2078,6 +2080,7 @@ begin
     IniFile.WriteString('WebQueue', 'Overlay', IWebQueueOverlay[WebQueueOverlay]);
     IniFile.WriteInteger('WebQueue', 'Port', WebQueuePort);
     IniFile.WriteString('WebQueue', 'Address', WebQueueAddress);
+    IniFile.WriteString('WebQueue', 'Syncer', WebQueueSyncer);
 
     // Directories (add a template if section is missing)
     // Note: Value must be ' ' and not '', otherwise no key is generated on Linux

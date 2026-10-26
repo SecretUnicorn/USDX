@@ -881,6 +881,117 @@ begin
   SendResponse(Sock, '200 OK', 'image/jpeg', Data, 'public, max-age=86400');
 end;
 
+function UrlEncode(const Text: RawByteString): RawByteString;
+var
+  I: integer;
+begin
+  Result := '';
+  for I := 1 to Length(Text) do
+    if (Text[I] in ['A'..'Z', 'a'..'z', '0'..'9', '-', '_', '.', '~']) then
+      Result := Result + Text[I]
+    else
+      Result := Result + '%' + IntToHex(Ord(Text[I]), 2);
+end;
+
+{* Minimal HTTP client, enough to talk to the USDB Syncer on this machine.
+   Only a numeric host or localhost, no redirects, no chunked bodies - the
+   syncer is a Flask app answering with plain Content-Length responses. *}
+function HttpAsk(const Method, Path, Body: RawByteString; out Answer: RawByteString): boolean;
+var
+  Host:    RawByteString;
+  Port, P: integer;
+  Addr:    TInetSockAddr;
+  Sock:    longint;
+  Request: RawByteString;
+  Chunk:   array[0..4095] of byte;
+  Res:     integer;
+  Target:  RawByteString;
+  Timeout: TTimeVal;
+begin
+  Result := false;
+  Answer := '';
+
+  Target := Ini.WebQueueSyncer;
+  if (Target = '') then
+    Exit;
+
+  // http://host:port
+  P := Pos('://', Target);
+  if (P > 0) then
+    Target := Copy(Target, P + 3, Length(Target));
+  while (Length(Target) > 0) and (Target[Length(Target)] = '/') do
+    SetLength(Target, Length(Target) - 1);
+
+  Port := 80;
+  P := Pos(':', Target);
+  if (P > 0) then
+  begin
+    Port := StrToIntDef(Copy(Target, P + 1, Length(Target)), 80);
+    Host := Copy(Target, 1, P - 1);
+  end
+  else
+    Host := Target;
+
+  if (LowerCase(Host) = 'localhost') then
+    Host := '127.0.0.1';
+
+  Sock := fpSocket(AF_INET, SOCK_STREAM, 0);
+  if (Sock < 0) then
+    Exit;
+
+  try
+    Timeout.tv_sec  := 5;
+    Timeout.tv_usec := 0;
+    fpSetSockOpt(Sock, SOL_SOCKET, SO_RCVTIMEO, @Timeout, SizeOf(Timeout));
+    fpSetSockOpt(Sock, SOL_SOCKET, SO_SNDTIMEO, @Timeout, SizeOf(Timeout));
+
+    FillChar(Addr, SizeOf(Addr), 0);
+    Addr.sin_family := AF_INET;
+    Addr.sin_port   := htons(Port);
+    Addr.sin_addr   := StrToNetAddr(Host);
+    if (Addr.sin_addr.s_addr = 0) then
+      Exit;
+
+    if (fpConnect(Sock, @Addr, SizeOf(Addr)) <> 0) then
+      Exit;
+
+    Request := Method + ' ' + Path + ' HTTP/1.1'#13#10 +
+               'Host: ' + Host + #13#10 +
+               'Connection: close'#13#10;
+    if (Method = 'POST') then
+      Request := Request +
+                 'Content-Type: application/x-www-form-urlencoded'#13#10 +
+                 'Content-Length: ' + IntToStr(Length(Body)) + #13#10;
+    Request := Request + #13#10 + Body;
+
+    P := 0;
+    {$IF Defined(UNIX) and not Defined(DARWIN)}
+      P := USDX_MSG_NOSIGNAL;
+    {$IFEND}
+    if (fpSend(Sock, @Request[1], Length(Request), P) <= 0) then
+      Exit;
+
+    repeat
+      Res := fpRecv(Sock, @Chunk[0], SizeOf(Chunk), 0);
+      if (Res > 0) then
+      begin
+        SetLength(Answer, Length(Answer) + Res);
+        System.Move(Chunk[0], Answer[Length(Answer) - Res + 1], Res);
+      end;
+    until (Res <= 0) or (Length(Answer) > 512 * 1024);
+
+    // cut the headers off
+    P := Pos(#13#10#13#10, Answer);
+    if (P = 0) then
+      Exit;
+
+    Result := Pos('200', Copy(Answer, 1, 15)) > 0;
+    Answer := Copy(Answer, P + 4, Length(Answer));
+  finally
+    CloseSocket(Sock);
+  end;
+end;
+
 procedure TWebServerThread.SendPhoto(Sock: longint; ID: cardinal);
 var
   Photo: UTF8String;
@@ -903,6 +1014,7 @@ var
   P: integer;
   Songs: TWebSongArray;
   Total, Offset, Limit, Added: integer;
+  Answer: RawByteString;
 begin
   Target := RequestPath;
   Query  := '';
@@ -942,6 +1054,44 @@ begin
   if (Method = 'GET') and (Target = '/api/wishes') then
   begin
     SendResponse(Sock, '200 OK', 'text/plain; charset=utf-8', WebQueue.GetWishes);
+    Exit;
+  end;
+
+  // the USDB Syncer, if one is configured, searched and started from here so
+  // the phones never have to reach it themselves
+  if (Method = 'GET') and (Target = '/api/usdb') then
+  begin
+    if (Ini.WebQueueSyncer = '') then
+      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', '{"off":true}')
+    else if HttpAsk('GET', '/api/songs?limit=25&search=' + UrlEncode(GetParam(Query, 'q')),
+                    '', Answer) then
+      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
+                   '{"songs":' + Answer + '}')
+    else
+      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
+                   '{"error":"The USDB Syncer did not answer"}');
+    Exit;
+  end;
+
+  if (Method = 'POST') and (Target = '/api/usdb/download') then
+  begin
+    if HttpAsk('POST', '/api/songs/' + IntToStr(ParamToID(Body, 'id')) + '/download',
+               '', Answer) then
+      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', Answer)
+    else
+      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
+                   '{"error":"The download could not be started"}');
+    Exit;
+  end;
+
+  if (Method = 'GET') and (Target = '/api/usdb/status') then
+  begin
+    if HttpAsk('GET', '/api/songs/' + IntToStr(ParamToID(Query, 'id')) + '/download',
+               '', Answer) then
+      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', Answer)
+    else
+      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
+                   '{"error":"The USDB Syncer did not answer"}');
     Exit;
   end;
 

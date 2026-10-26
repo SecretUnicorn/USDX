@@ -2053,7 +2053,10 @@ begin
     if WebQueue.RefreshRequested and Assigned(Songs) then
     begin
       Added := Songs.LoadNewSongs;
+      // tell the page before rebuilding the song screen, that part is slow
       WebQueue.RefreshFinished(Added);
+      if (Added > 0) then
+        Songs.RefreshSongScreen;
     end;
   end;
 
