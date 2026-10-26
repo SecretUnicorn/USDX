@@ -289,6 +289,8 @@ begin
     S.Add('offset+=data.songs.length;');
     S.Add('elMore.hidden=offset>=total;');
     S.Add('document.getElementById("sempty").hidden=total>0;');
+    // only what the collection does not have is worth offering from USDB
+    S.Add('if(total>0){elUsdb.innerHTML="";}else{usdbSearch();}');
     S.Add('}).catch(function(){loading=false;});}');
     S.Add('function applyView(){');
     S.Add('elSongs.className="view-"+view;');
@@ -390,13 +392,13 @@ begin
     S.Add('fetch("/api/library/refresh").then(function(r){return r.json();}).then(function(f){');
     S.Add('if(!f.done){return;}');
     S.Add('clearInterval(rp);b.textContent="In the collection";');
-    S.Add('toast(x.title+" can be sung now");loadSongs(true);usdbSearch();');
+    S.Add('toast(x.title+" can be sung now");loadSongs(true);');
     S.Add('});},1500);});');
     S.Add('});},3000);');
     S.Add('}).catch(function(){b.disabled=false;b.textContent="Download";toast("Connection lost");});}');
     S.Add('elSearch.addEventListener("input",function(){');
     S.Add('clearTimeout(timer);');
-    S.Add('timer=setTimeout(function(){query=elSearch.value;loadSongs(true);usdbSearch();},250);});');
+    S.Add('timer=setTimeout(function(){query=elSearch.value;loadSongs(true);},250);});');
     S.Add('applyView();applySort();updateNameState();');
     S.Add('loadSongs(true);loadQueue(true);');
     S.Add('setInterval(function(){loadQueue(false);},2500);');
