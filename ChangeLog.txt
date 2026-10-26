@@ -15,6 +15,10 @@ Unreleased
 - web song queue: the queue can be shuffled so that nobody sings three songs in
   a row, the search tolerates typos, and a song that is missing from the
   collection can be requested into song-requests.txt
+- the song queue survives a restart, and Ctrl+E shows it full screen with keys
+  to reorder, remove and clear it
+- web song queue: the song list loads further while scrolling, and the search
+  forgives typos in short words as well, with exact matches listed first
 - the web server shows the songs guests asked for at /wuensche, and the title
   of every page is a menu to the other pages
 - the web server offers a second page at /players where the names of the

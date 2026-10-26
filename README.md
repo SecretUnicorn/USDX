@@ -55,6 +55,9 @@ removed from the page again. Songs that carry medley in/out tags also offer a
 green **½** button next to the **+**, which queues only the tagged part of the
 song; those entries are marked SHORT in the queue.
 
+The queue survives a restart: it is kept in `song-queue.txt` next to
+`config.ini` and read back when the game starts.
+
 If the configured port is already taken by another program, the next free port
 is used and the overlay shows the address that actually works.
 
@@ -70,6 +73,9 @@ In the game:
   is built there - confirm the players once, then `Ctrl+N` starts songs directly.
 - `Ctrl+L` shows/hides the queue overlay. `Overlay=Off` hides it by default.
 - `Ctrl+Q` shows/hides a big QR code of the address for guests to scan.
+- `Ctrl+E` shows the whole queue full screen and lets you edit it:
+  `Up`/`Down` pick an entry, `Left`/`Right` move it, `Del` removes it and `C`
+  pressed twice empties the queue.
 - `Ctrl+M` turns the queue into a medley: it lists the queued songs, marks the
   ones USDX has medley data for, and `Left`/`Right` pick how many of them to
   sing. `Enter` starts, `Esc` closes. The queue itself is kept.
@@ -81,7 +87,9 @@ do not end up on top all evening. Every entry says how often it has been sung,
 taken from the same statistics the game shows, so *Times sung* with *Least
 first* finds the songs nobody has picked yet. Every entry shows its length, is
 marked TODAY while it has already been sung today and QUEUED while it waits in
-the queue. The search tolerates typos, so *metalica* still finds Metallica.
+the queue. The list grows while scrolling instead of asking for the next page. The search
+tolerates typos, so *metalica* finds Metallica and *djo* finds Djo; songs that
+really contain what was typed are listed before the ones with a corrected typo.
 
 **Shuffle** above the queue mixes it so that nobody sings three songs in a row,
 as far as the queue allows that at all.

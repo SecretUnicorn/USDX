@@ -92,6 +92,7 @@ type
       PlayerInfo:  TWebPlayerArray;        // snapshot of the players, written once per frame
       PendingName: array of UTF8String;    // names the page asked for, applied on the main thread
       Singing:     boolean;
+      SavedRevision: cardinal; // revision the queue file was written for
       Entries:     TWebQueueEntryArray;
       NextEntryID: cardinal;
       fRevision:   cardinal; // bumped on every change so the web page can poll cheaply
@@ -112,6 +113,11 @@ type
       {* Main thread, once per frame: hands over the names the page asked for
          and takes a snapshot of the players for it to show. *}
       procedure UpdatePlayers;
+
+      {* The queue outlives the program: written whenever it changed, read
+         back when the game starts. Main thread. *}
+      procedure LoadQueue;
+      procedure SaveQueueIfChanged;
       procedure AddWish(const Wish, Singer: UTF8String);
       function  GetWishes: UTF8String;
 
@@ -163,6 +169,11 @@ function  WebQueueMedleyPickerVisible: boolean;
 procedure WebQueueMedleyAdjust(Delta: integer);
 procedure WebQueueMedleyStart;
 procedure CloseWebQueueMedleyPicker;
+
+{* The whole queue on one screen, with the keys that change it. *}
+procedure ToggleWebQueueEditor;
+function  WebQueueEditorVisible: boolean;
+procedure WebQueueEditorKey(Key: integer);
 
 {* Shows/hides the big QR code of the song request address. *}
 procedure ToggleWebQueueQRCode;
@@ -230,6 +241,10 @@ var
   MedleyEligible:    integer = 0; // how many candidates can actually be sung
   MedleyCount:       integer = 0; // how many of them the user picked
 
+  EditorOpen:      boolean = false;
+  EditorCursor:    integer = 0;
+  EditorConfirmClear: boolean = false; // the second C really clears
+
   QRVisible:       boolean = false;
   QRCode:          TQRCode;
   QRAddress:       string = ''; // address the cached code was built from
@@ -276,6 +291,83 @@ begin
     OverlayOverride := 0
   else
     OverlayOverride := 1;
+end;
+
+procedure ToggleWebQueueEditor;
+begin
+  EditorOpen := not EditorOpen;
+  EditorCursor := 0;
+  EditorConfirmClear := false;
+end;
+
+function WebQueueEditorVisible: boolean;
+begin
+  Result := EditorOpen;
+end;
+
+procedure WebQueueEditorKey(Key: integer);
+var
+  Entries: TWebQueueEntryArray;
+  Count:   integer;
+begin
+  if not EditorOpen then
+    Exit;
+
+  Entries := WebQueue.GetEntries;
+  Count   := Length(Entries);
+
+  // any key other than a second C takes the clear back
+  if (Key <> SDLK_C) then
+    EditorConfirmClear := false;
+
+  if (EditorCursor > Count - 1) then
+    EditorCursor := Count - 1;
+  if (EditorCursor < 0) then
+    EditorCursor := 0;
+
+  case Key of
+    SDLK_ESCAPE:
+      EditorOpen := false;
+
+    SDLK_UP:
+      if (EditorCursor > 0) then
+        Dec(EditorCursor);
+
+    SDLK_DOWN:
+      if (EditorCursor < Count - 1) then
+        Inc(EditorCursor);
+
+    SDLK_LEFT:
+      if (Count > 0) and (EditorCursor > 0) and
+         WebQueue.MoveEntry(Entries[EditorCursor].EntryID, -1) then
+        Dec(EditorCursor);
+
+    SDLK_RIGHT:
+      if (Count > 0) and (EditorCursor < Count - 1) and
+         WebQueue.MoveEntry(Entries[EditorCursor].EntryID, 1) then
+        Inc(EditorCursor);
+
+    SDLK_DELETE, SDLK_BACKSPACE:
+      if (Count > 0) then
+      begin
+        WebQueue.RemoveEntry(Entries[EditorCursor].EntryID);
+        if (EditorCursor > Count - 2) then
+          EditorCursor := Max(0, Count - 2);
+      end;
+
+    SDLK_C:
+      if (Count > 0) then
+      begin
+        if EditorConfirmClear then
+        begin
+          WebQueue.Clear;
+          EditorConfirmClear := false;
+          EditorCursor := 0;
+        end
+        else
+          EditorConfirmClear := true;
+      end;
+  end;
 end;
 
 procedure ToggleWebQueueQRCode;
@@ -653,7 +745,8 @@ var
   I, Limit: integer;
 begin
   Result := false;
-  if (Length(Word) < 4) then
+  // two letters are too little to tell a typo from a different word
+  if (Length(Word) < 3) then
     Exit;
 
   Limit := IfThen(Length(Word) <= 6, 1, 2);
@@ -708,7 +801,9 @@ function TWebQueue.SearchSongs(const Search: UTF8String; Offset, Limit: integer;
 var
   I, Added:  integer;
   Matches:   array of integer;
+  Typo:      array of boolean; // matched only because a typo was forgiven
   MatchCnt:  integer;
+  Loose:     boolean;
   Needle:    UTF8String;
   Words:     TStringList;
   Order:     TStringList;
@@ -731,22 +826,31 @@ begin
     end;
 
     SetLength(Matches, Length(SongIndex));
+    SetLength(Typo, Length(SongIndex));
     MatchCnt := 0;
 
     for I := 0 to High(SongIndex) do
     begin
       Matched := true;
+      Loose   := false;
       for W := 0 to Words.Count - 1 do
-        if (Words[W] <> '') and (Pos(Words[W], SongIndex[I].SearchText) = 0) and
-           (not FuzzyMatch(SongIndex[I].SearchText, Words[W])) then
+      begin
+        if (Words[W] = '') or (Pos(Words[W], SongIndex[I].SearchText) > 0) then
+          Continue;
+
+        if FuzzyMatch(SongIndex[I].SearchText, Words[W]) then
+          Loose := true
+        else
         begin
           Matched := false;
           Break;
         end;
+      end;
 
       if Matched then
       begin
         Matches[MatchCnt] := I;
+        Typo[MatchCnt]    := Loose;
         Inc(MatchCnt);
       end;
     end;
@@ -759,14 +863,31 @@ begin
       try
         Order.Capacity := MatchCnt;
         for I := 0 to MatchCnt - 1 do
-          Order.AddObject(SongSortKey(SongIndex[Matches[I]], Sort, Seed, Desc),
+          // what the guest actually typed comes before what we guessed
+          Order.AddObject(IfThen(Typo[I], '1', '0') +
+                          SongSortKey(SongIndex[Matches[I]], Sort, Seed, Desc),
                           TObject(PtrInt(Matches[I])));
         Order.Sort;
 
-        for I := 0 to MatchCnt - 1 do
-          if Desc then
-            Matches[MatchCnt - 1 - I] := PtrInt(Order.Objects[I])
-          else
+        if Desc then
+        begin
+          // reverse inside the two groups, not across them
+          Added := 0;
+          for I := MatchCnt - 1 downto 0 do
+            if (Order[I][1] = '0') then
+            begin
+              Matches[Added] := PtrInt(Order.Objects[I]);
+              Inc(Added);
+            end;
+          for I := MatchCnt - 1 downto 0 do
+            if (Order[I][1] <> '0') then
+            begin
+              Matches[Added] := PtrInt(Order.Objects[I]);
+              Inc(Added);
+            end;
+        end
+        else
+          for I := 0 to MatchCnt - 1 do
             Matches[I] := PtrInt(Order.Objects[I]);
       finally
         Order.Free;
@@ -989,11 +1110,114 @@ begin
   end;
 end;
 
-{* Tabs and line breaks would turn one wish into several lines. *}
+{* Tabs and line breaks would turn one entry into several lines. *}
 function OneLine(const Text: UTF8String): UTF8String;
 begin
   Result := Trim(StringReplace(StringReplace(StringReplace(Text,
               #13, ' ', [rfReplaceAll]), #10, ' ', [rfReplaceAll]), #9, ' ', [rfReplaceAll]));
+end;
+
+function QueueFile: IPath;
+begin
+  Result := Platform.GetGameUserPath.Append('song-queue.txt');
+end;
+
+procedure TWebQueue.LoadQueue;
+var
+  Lines:  TStringList;
+  Fields: TStringList;
+  I, Len: integer;
+begin
+  if not QueueFile.IsFile then
+    Exit;
+
+  Lines  := TStringList.Create;
+  Fields := TStringList.Create;
+  try
+    try
+      Lines.LoadFromFile(QueueFile.ToNative);
+    except
+      Log.LogError('Could not read ' + QueueFile.ToNative, 'TWebQueue.LoadQueue');
+      Exit;
+    end;
+
+    Fields.Delimiter := #9;
+    Fields.StrictDelimiter := true;
+
+    EnterCriticalSection(Lock);
+    try
+      for I := 0 to Lines.Count - 1 do
+      begin
+        if (Trim(Lines[I]) = '') then
+          Continue;
+
+        Fields.DelimitedText := Lines[I];
+        if (Fields.Count < 5) then
+          Continue;
+
+        Len := Length(Entries);
+        if (Len >= WebQueueMaxLength) then
+          Break;
+
+        SetLength(Entries, Len + 1);
+        Entries[Len].EntryID := NextEntryID;
+        Inc(NextEntryID);
+        Entries[Len].SongID := StrToIntDef(Fields[0], 0);
+        Entries[Len].Short  := Fields[1] = '1';
+        Entries[Len].Singer := Fields[2];
+        Entries[Len].Artist := Fields[3];
+        Entries[Len].Title  := Fields[4];
+        if (Fields.Count > 5) then
+          Entries[Len].Path := Fields[5];
+      end;
+
+      SavedRevision := fRevision;
+    finally
+      LeaveCriticalSection(Lock);
+    end;
+  finally
+    Fields.Free;
+    Lines.Free;
+  end;
+
+  Log.LogStatus(Format('Restored %d queued songs', [Length(Entries)]), 'TWebQueue.LoadQueue');
+end;
+
+procedure TWebQueue.SaveQueueIfChanged;
+var
+  Lines: TStringList;
+  Copy_: TWebQueueEntryArray;
+  I: integer;
+begin
+  EnterCriticalSection(Lock);
+  try
+    if (SavedRevision = fRevision) then
+      Exit;
+
+    SavedRevision := fRevision;
+    Copy_ := Copy(Entries, 0, Length(Entries));
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+
+  Lines := TStringList.Create;
+  try
+    for I := 0 to High(Copy_) do
+      Lines.Add(IntToStr(Copy_[I].SongID) + #9 +
+                IfThen(Copy_[I].Short, '1', '0') + #9 +
+                OneLine(Copy_[I].Singer) + #9 +
+                OneLine(Copy_[I].Artist) + #9 +
+                OneLine(Copy_[I].Title) + #9 +
+                OneLine(Copy_[I].Path));
+
+    try
+      Lines.SaveToFile(QueueFile.ToNative);
+    except
+      Log.LogError('Could not write ' + QueueFile.ToNative, 'TWebQueue.SaveQueueIfChanged');
+    end;
+  finally
+    Lines.Free;
+  end;
 end;
 
 {* A song somebody missed in the list. Appended to a file so it can be read
@@ -1403,7 +1627,10 @@ end;
 procedure ProcessWebQueueRequest;
 begin
   if Assigned(WebQueue) then
+  begin
     WebQueue.UpdatePlayers;
+    WebQueue.SaveQueueIfChanged;
+  end;
 
   if (not StartRequested) and (not MedleyRequested) then
     Exit;
@@ -1850,6 +2077,98 @@ begin
   Renderer.DepthTest := true;
 end;
 
+{**
+ * The whole queue, full screen, with a cursor to reorder and remove entries.
+ *}
+procedure DrawQueueEditor;
+var
+  Entries: TWebQueueEntryArray;
+  I, Count, First, Shown: integer;
+  PanelX, PanelY, PanelW, PanelH, LineY: real;
+  Line: UTF8String;
+const
+  LineHeight = 19;
+  HeaderHeight = 34;
+  MaxLines = 18;
+begin
+  Entries := WebQueue.GetEntries;
+  Count   := Length(Entries);
+
+  if (EditorCursor > Count - 1) then
+    EditorCursor := Max(0, Count - 1);
+
+  Shown := Min(Count, MaxLines);
+  // keep the cursor inside the window
+  First := Max(0, Min(EditorCursor - MaxLines div 2, Count - MaxLines));
+
+  PanelW := 700;
+  PanelH := HeaderHeight + LineHeight * Max(Shown, 1) + 42;
+  PanelX := (800 - PanelW) / 2;
+  PanelY := (600 - PanelH) / 2;
+
+  Renderer.DepthTest := false;
+  Renderer.DrawQuad(0, 0, 0, 800, 600, 0, 0, 0, 0.75);
+  Renderer.DrawQuad(PanelX, PanelY, 0, PanelW, PanelH, 0.07, 0.08, 0.12, 0.96);
+
+  SetFontFamily(0);
+  SetFontStyle(ftRegular);
+  SetFontItalic(false);
+  SetFontReflection(false, 0);
+
+  SetFontSize(21);
+  SetFontColor(1, 0.82, 0.2, 1);
+  SetFontPos(PanelX + 14, PanelY + 6);
+  PrintText(Format(Language.Translate('WEBQUEUE_EDIT_TITLE'), [Count]));
+
+  SetFontSize(15);
+  LineY := PanelY + HeaderHeight;
+
+  if (Count = 0) then
+  begin
+    SetFontColor(0.75, 0.75, 0.75, 1);
+    SetFontPos(PanelX + 14, LineY);
+    PrintText(TruncateToWidth(Language.Translate('WEBQUEUE_EMPTY'), PanelW - 28));
+  end
+  else
+    for I := First to Min(First + MaxLines, Count) - 1 do
+    begin
+      if (I = EditorCursor) then
+      begin
+        Renderer.DrawQuad(PanelX + 8, LineY - 2, 0, PanelW - 16, LineHeight, 1, 0.82, 0.2, 0.18);
+        SetFontColor(1, 0.9, 0.5, 1);
+      end
+      else
+        SetFontColor(0.85, 0.85, 0.85, 1);
+
+      Line := IntToStr(I + 1) + '. ' + Entries[I].Artist + ' - ' + Entries[I].Title;
+      if Entries[I].Short then
+        Line := Line + ' (' + Language.Translate('WEBQUEUE_SHORT') + ')';
+      if (Entries[I].Singer <> '') then
+        Line := Line + ' [' + Entries[I].Singer + ']';
+
+      SetFontPos(PanelX + 14, LineY);
+      PrintText(TruncateToWidth(Line, PanelW - 28));
+      LineY := LineY + LineHeight;
+    end;
+
+  if EditorConfirmClear then
+  begin
+    SetFontColor(1, 0.5, 0.4, 1);
+    Line := Language.Translate('WEBQUEUE_EDIT_CONFIRM');
+  end
+  else
+  begin
+    SetFontColor(0.7, 0.7, 0.7, 1);
+    Line := Language.Translate('WEBQUEUE_EDIT_HINT');
+  end;
+
+  SetFontSize(14);
+  SetFontPos(PanelX + 14, PanelY + PanelH - 26);
+  PrintText(TruncateToWidth(Line, PanelW - 28));
+
+  Renderer.DepthTest := true;
+end;
+
 procedure DrawWebQueueOverlay;
 begin
   if (not Assigned(WebQueue)) or (not WebQueueEnabled) then
@@ -1867,6 +2186,9 @@ begin
 
   if MedleyPickerOpen then
     DrawMedleyPicker;
+
+  if EditorOpen then
+    DrawQueueEditor;
 end;
 
 end.

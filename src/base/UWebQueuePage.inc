@@ -55,7 +55,8 @@ begin
     S.Add('.btns button{width:44px;height:44px;padding:0;font-size:20px;line-height:1;}');
     S.Add('#songs.view-grid .btns button{width:auto;flex:1;}');
     S.Add('.empty{color:var(--dim);font-size:14px;padding:6px 2px;}');
-    S.Add('.more{width:100%;margin-top:4px;}');
+    S.Add('.more{width:100%;margin-top:4px;padding:12px;text-align:center;');
+    S.Add('color:var(--dim);font-size:13px;}');
     S.Add('.badge{background:var(--panel2);border-radius:20px;padding:2px 9px;color:var(--text);font-size:12px;}');
     S.Add('.toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--accent2);color:#04281c;padding:10px 16px;border-radius:20px;font-weight:600;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:20;}');
     S.Add('.toast.show{opacity:1;}');
@@ -127,7 +128,7 @@ begin
     S.Add('<button id="sortdir"></button>');
     S.Add('</div>');
     S.Add('<ul id="songs"></ul>');
-    S.Add('<button class="more" id="more" hidden>Show more</button>');
+    S.Add('<div class="more" id="more" hidden>Loading more songs...</div>');
     S.Add('<div class="empty" id="sempty" hidden>Nothing found. ');
     S.Add('<button class="mini" id="wish">Request this song</button></div>');
     S.Add('</section>');
@@ -135,7 +136,7 @@ begin
     S.Add('<div class="toast" id="toast"></div>');
     S.Add('<script>');
     S.Add('var PAGE=60;var offset=0;var total=0;var query="";var rev=-1;var timer=null;');
-    S.Add('var reqid=0;');
+    S.Add('var reqid=0;var loading=false;');
     S.Add('var elSongs=document.getElementById("songs");');
     S.Add('var elQueue=document.getElementById("queue");');
     S.Add('var elMore=document.getElementById("more");');
@@ -263,11 +264,14 @@ begin
     S.Add('markQueued();');
     S.Add('}).catch(function(){});}');
     S.Add('function loadSongs(reset){');
+    S.Add('if(loading&&!reset){return;}');
     S.Add('if(reset){offset=0;elSongs.innerHTML="";}');
+    S.Add('loading=true;');
     S.Add('var req=++reqid;');
     S.Add('var url="/api/songs?offset="+offset+"&limit="+PAGE+"&q="+encodeURIComponent(query)');
     S.Add('+"&sort="+sort+"&dir="+dir+"&seed="+seed;');
     S.Add('fetch(url).then(function(r){return r.json();}).then(function(data){');
+    S.Add('loading=false;');
     S.Add('if(req!==reqid){return;}');
     S.Add('total=data.total;');
     S.Add('document.getElementById("scount").textContent=total;');
@@ -277,7 +281,7 @@ begin
     S.Add('offset+=data.songs.length;');
     S.Add('elMore.hidden=offset>=total;');
     S.Add('document.getElementById("sempty").hidden=total>0;');
-    S.Add('}).catch(function(){});}');
+    S.Add('}).catch(function(){loading=false;});}');
     S.Add('function applyView(){');
     S.Add('elSongs.className="view-"+view;');
     S.Add('Array.prototype.forEach.call(document.querySelectorAll(".views button"),function(b){');
@@ -309,7 +313,12 @@ begin
     S.Add('if(!wish){elSearch.focus();return;}');
     S.Add('post("/api/wish",{wish:wish,singer:elSinger.value}).then(function(){');
     S.Add('toast("Noted: "+wish);}).catch(function(){toast("Connection lost");});};');
-    S.Add('elMore.onclick=function(){loadSongs(false);};');
+    // the next page is fetched when the end of the list comes into view
+    S.Add('if(window.IntersectionObserver){');
+    S.Add('new IntersectionObserver(function(entries){');
+    S.Add('if(entries[0].isIntersecting&&!elMore.hidden){loadSongs(false);}');
+    S.Add('},{rootMargin:"400px"}).observe(elMore);}');
+    S.Add('else{elMore.onclick=function(){loadSongs(false);};}');
     S.Add('elSearch.addEventListener("input",function(){');
     S.Add('clearTimeout(timer);');
     S.Add('timer=setTimeout(function(){query=elSearch.value;loadSongs(true);},250);});');

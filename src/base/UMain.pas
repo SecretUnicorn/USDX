@@ -205,6 +205,7 @@ begin
     // Song request queue, has to exist before the songs are loaded
     Log.LogStatus('Web Queue', 'Initialization');
     WebQueue := TWebQueue.Create;
+    WebQueue.LoadQueue;
 
     // Graphics
     Initialize3D(WindowTitle);
@@ -540,6 +541,14 @@ begin
           // remap the "keypad enter" key to the "standard enter" key
           if (Event.key.keysym.sym = SDLK_KP_ENTER) then Event.key.keysym.sym := SDLK_RETURN;
 
+          // the queue editor owns the keyboard while it is open
+          if (Event.type_ = SDL_KEYDOWN) and WebQueueEnabled and Assigned(WebQueue) and
+             WebQueueEditorVisible then
+          begin
+            WebQueueEditorKey(Event.key.keysym.sym);
+            Continue;
+          end;
+
           // the medley picker owns the keyboard while it is open
           if (Event.type_ = SDL_KEYDOWN) and WebQueueEnabled and Assigned(WebQueue) and
              WebQueueMedleyPickerVisible then
@@ -585,6 +594,11 @@ begin
             else if (Event.key.keysym.sym = SDLK_M) then
             begin
               ToggleWebQueueMedleyPicker;
+              Continue;
+            end
+            else if (Event.key.keysym.sym = SDLK_E) then
+            begin
+              ToggleWebQueueEditor;
               Continue;
             end;
           end;
