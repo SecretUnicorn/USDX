@@ -111,6 +111,11 @@ type
     destructor  Destroy(); override;
 
     procedure LoadSongList;     // load all songs
+
+    {* Looks for song files that are not in the list yet and adds them. Main
+       thread, so a song downloaded during the party can be sung right away
+       without starting the game again. Returns how many were added. *}
+    function LoadNewSongs: integer;
   procedure FindFilesByExtension(const Dir: IPath; const Ext: IPath; Recursive: Boolean; var Files: TPathDynArray);
     procedure Sort(Order: TSortingType);
     property  Processing: boolean read fProcessing;
@@ -348,6 +353,58 @@ procedure TSongs.LoadSongList;
 begin
   fParseSongDirectory := true;
   Resume();
+end;
+
+function TSongs.LoadNewSongs: integer;
+var
+  SongFiles: TPathDynArray;
+  Known:     TStringList;
+  I, Before: integer;
+  FullPath:  UTF8String;
+begin
+  Result := 0;
+  if fProcessing then
+    Exit;
+
+  fProcessing := true;
+  Known := TStringList.Create;
+  try
+    Known.Sorted := true;
+    Known.Duplicates := dupIgnore;
+    for I := 0 to SongList.Count - 1 do
+      with TSong(SongList[I]) do
+        if (Path <> nil) and (FileName <> nil) then
+          Known.Add(Path.Append(FileName).ToUTF8());
+
+    SongFiles := CollectSongFiles;
+    Before := SongList.Count;
+
+    for I := 0 to High(SongFiles) do
+    begin
+      FullPath := SongFiles[I].ToUTF8();
+      if (Known.IndexOf(FullPath) < 0) then
+        LoadSongFromFile(SongFiles[I]);
+    end;
+
+    Result := SongList.Count - Before;
+    if (Result > 0) then
+    begin
+      if Assigned(CatSongs) then
+        CatSongs.Refresh;
+      if Assigned(CatCovers) then
+        CatCovers.Load;
+      if Assigned(ScreenSong) then
+      begin
+        ScreenSong.GenerateThumbnails();
+        ScreenSong.OnShow;
+      end;
+    end;
+  finally
+    SetLength(SongFiles, 0);
+    Known.Free;
+    fProcessing := false;
+    Log.LogStatus(Format('%d new songs found', [Result]), 'TSongs.LoadNewSongs');
+  end;
 end;
 
 procedure TSongs.FindFilesByExtension(const Dir: IPath; const Ext: IPath; Recursive: Boolean; var Files: TPathDynArray);

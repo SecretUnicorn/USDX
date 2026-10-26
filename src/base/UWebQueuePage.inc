@@ -115,6 +115,9 @@ begin
     S.Add('<button data-view="grid" aria-pressed="false">Grid</button>');
     S.Add('</span> <span class="badge" id="scount">0</span></h2>');
     S.Add('<div class="row" style="margin-bottom:8px">');
+    S.Add('<button class="mini" id="rescan">Look for new songs</button>');
+    S.Add('</div>');
+    S.Add('<div class="row" style="margin-bottom:8px">');
     S.Add('<input id="search" type="search" placeholder="Search artist, title, genre, year..." autocomplete="off">');
     S.Add('</div>');
     S.Add('<div class="sortbar">');
@@ -304,6 +307,21 @@ begin
     S.Add('else{dir=dir==="asc"?"desc":"asc";');
     S.Add('try{localStorage.setItem("usdxSortDir",dir);}catch(e){}}');
     S.Add('applySort();loadSongs(true);};');
+    S.Add('var elRescan=document.getElementById("rescan");');
+    S.Add('elRescan.onclick=function(){');
+    S.Add('elRescan.disabled=true;elRescan.textContent="Looking...";');
+    S.Add('post("/api/library/refresh",{}).then(function(){');
+    // the game answers when its own thread got round to it
+    S.Add('var tries=0;');
+    S.Add('var poll=setInterval(function(){');
+    S.Add('tries++;');
+    S.Add('fetch("/api/library/refresh").then(function(r){return r.json();}).then(function(d){');
+    S.Add('if(!d.done&&tries<60){return;}');
+    S.Add('clearInterval(poll);');
+    S.Add('elRescan.disabled=false;elRescan.textContent="Look for new songs";');
+    S.Add('if(d.done){toast(d.added===1?"1 new song":d.added+" new songs");loadSongs(true);}');
+    S.Add('});},1000);');
+    S.Add('}).catch(function(){elRescan.disabled=false;elRescan.textContent="Look for new songs";});};');
     S.Add('elShuffle.onclick=function(){elShuffle.disabled=true;');
     S.Add('post("/api/queue/shuffle",{}).then(function(){elShuffle.disabled=false;loadQueue(true);');
     S.Add('toast("Queue shuffled");}).catch(function(){elShuffle.disabled=false;});};');

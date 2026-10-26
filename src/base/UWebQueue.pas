@@ -107,6 +107,9 @@ type
       SlotPhoto:   array of TTexture;      // the picture we handed to the game for that microphone
       Singing:     boolean;
       SavedRevision: cardinal; // revision the queue file was written for
+      RefreshWanted: boolean;  // the page asked to look for new songs
+      RefreshDone:   boolean;
+      RefreshAdded:  integer;
       Entries:     TWebQueueEntryArray;
       NextEntryID: cardinal;
       fRevision:   cardinal; // bumped on every change so the web page can poll cheaply
@@ -130,6 +133,12 @@ type
 
       {* The queue outlives the program: written whenever it changed, read
          back when the game starts. Main thread. *}
+      {* The page asked for a library refresh, the main thread does it. *}
+      procedure RequestLibraryRefresh;
+      function  TakeRefreshResult(out Added: integer): boolean;
+      function  RefreshRequested: boolean;
+      procedure RefreshFinished(Added: integer);
+
       procedure LoadQueue;
       procedure SaveQueueIfChanged;
       procedure AddWish(const Wish, Singer: UTF8String);
@@ -1482,6 +1491,54 @@ begin
   Result := Platform.GetGameUserPath.Append('song-queue.txt');
 end;
 
+procedure TWebQueue.RequestLibraryRefresh;
+begin
+  EnterCriticalSection(Lock);
+  try
+    RefreshWanted := true;
+    RefreshDone   := false;
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+end;
+
+{* Main thread: is a refresh pending? Clears the request. *}
+function TWebQueue.RefreshRequested: boolean;
+begin
+  EnterCriticalSection(Lock);
+  try
+    Result := RefreshWanted;
+    RefreshWanted := false;
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+end;
+
+procedure TWebQueue.RefreshFinished(Added: integer);
+begin
+  EnterCriticalSection(Lock);
+  try
+    RefreshAdded := Added;
+    RefreshDone  := true;
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+end;
+
+{* True once the refresh has run, with the number of songs it found. *}
+function TWebQueue.TakeRefreshResult(out Added: integer): boolean;
+begin
+  EnterCriticalSection(Lock);
+  try
+    Result := RefreshDone;
+    Added  := RefreshAdded;
+    if Result then
+      RefreshDone := false;
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+end;
+
 procedure TWebQueue.LoadQueue;
 var
   Lines:  TStringList;
@@ -1985,11 +2042,19 @@ begin
 end;
 
 procedure ProcessWebQueueRequest;
+var
+  Added: integer;
 begin
   if Assigned(WebQueue) then
   begin
     WebQueue.UpdatePlayers;
     WebQueue.SaveQueueIfChanged;
+
+    if WebQueue.RefreshRequested and Assigned(Songs) then
+    begin
+      Added := Songs.LoadNewSongs;
+      WebQueue.RefreshFinished(Added);
+    end;
   end;
 
   if (not StartRequested) and (not MedleyRequested) then

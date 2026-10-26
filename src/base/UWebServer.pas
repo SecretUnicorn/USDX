@@ -902,7 +902,7 @@ var
   Target, Query: RawByteString;
   P: integer;
   Songs: TWebSongArray;
-  Total, Offset, Limit: integer;
+  Total, Offset, Limit, Added: integer;
 begin
   Target := RequestPath;
   Query  := '';
@@ -942,6 +942,23 @@ begin
   if (Method = 'GET') and (Target = '/api/wishes') then
   begin
     SendResponse(Sock, '200 OK', 'text/plain; charset=utf-8', WebQueue.GetWishes);
+    Exit;
+  end;
+
+  if (Method = 'POST') and (Target = '/api/library/refresh') then
+  begin
+    WebQueue.RequestLibraryRefresh;
+    SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', '{"ok":true}');
+    Exit;
+  end;
+
+  if (Method = 'GET') and (Target = '/api/library/refresh') then
+  begin
+    if WebQueue.TakeRefreshResult(Added) then
+      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
+                   '{"done":true,"added":' + IntToStr(Added) + '}')
+    else
+      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', '{"done":false}');
     Exit;
   end;
 

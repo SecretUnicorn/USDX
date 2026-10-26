@@ -58,6 +58,12 @@ song; those entries are marked SHORT in the queue.
 The queue survives a restart: it is kept in `song-queue.txt` next to
 `config.ini` and read back when the game starts.
 
+**Look for new songs** above the song list reads songs that appeared in the
+song folders while the game was running, so a song downloaded during the party
+can be sung without starting the game again. Only new songs are read, which
+takes a moment rather than the full startup scan; songs that were deleted stay
+in the list until the next start.
+
 If the configured port is already taken by another program, the next free port
 is used and the overlay shows the address that actually works.
 
