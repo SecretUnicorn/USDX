@@ -132,11 +132,18 @@ its library. The photo is scaled to 256 pixels in the browser before it is sent,
 and the singers are kept in the `webplayers` folder next to `config.ini`, so
 they are still there at the next party.
 
-A change is applied immediately: the sing screen shows the new name, and the
-score at the end of the song is stored under it - useful when the microphones
-change hands mid-party. Without a running song the names are kept for the next
-one. The photo appears on the score screen and in the following song, because
-the sing screen takes its pictures when it opens.
+The pencil next to a saved singer opens the same form again, to correct the
+name or to add a photo later on.
+
+A change is applied immediately: the sing screen shows the new name and the new
+photo, and the score at the end of the song is stored under that name - useful
+when the microphones change hands mid-party. Names are written to `config.ini`,
+because the player setup screen reads them back from there. The photo is put
+back whenever the game resets the avatars, which the player setup does every
+time it is confirmed.
+
+The score screen after a song still shows the default avatar; only the name
+follows there.
 
 Neither this page nor the wish list is protected, so anybody on the network can
 reach them through the menu.

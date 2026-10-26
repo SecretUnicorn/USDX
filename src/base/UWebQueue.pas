@@ -40,7 +40,8 @@ interface
 
 uses
   SysUtils,
-  Classes;
+  Classes,
+  URenderer;
 
 type
   {* A single song as it is offered on the web page. *}
@@ -103,6 +104,7 @@ type
       PendingName: array of UTF8String;    // names the page asked for, applied on the main thread
       PendingPhoto: array of UTF8String;   // avatar files to load, same handover
       SlotRoster:  array of cardinal;      // which saved singer sits on which microphone
+      SlotPhoto:   array of TTexture;      // the picture we handed to the game for that microphone
       Singing:     boolean;
       SavedRevision: cardinal; // revision the queue file was written for
       Entries:     TWebQueueEntryArray;
@@ -150,6 +152,7 @@ type
       // the saved singers, their photos live next to the roster file
       function  GetRoster: TWebRosterArray;
       function  AddRosterEntry(const AName, PhotoBase64: UTF8String): cardinal;
+      function  UpdateRosterEntry(ID: cardinal; const AName, PhotoBase64: UTF8String): boolean;
       function  DeleteRosterEntry(ID: cardinal): boolean;
       function  RosterPhoto(ID: cardinal): UTF8String;
       function  AssignRoster(Index: integer; ID: cardinal): boolean;
@@ -222,9 +225,9 @@ uses
   UPlaylist,
   UQRCode,
   UThemes,
-  URenderer,
   sdl2,
   UScreenName,
+  UScreenSingController,
   UScreenSong,
   USong,
   USongs,
@@ -455,6 +458,19 @@ procedure TWebQueue.UpdatePlayers;
 var
   I, Count, ColorNum: integer;
   Wanted: UTF8String;
+
+  procedure ApplyPhoto(Index: integer);
+  begin
+    if (SlotPhoto[Index] <> nil) then
+      AvatarPlayerTextures[Index + 1] := SlotPhoto[Index]
+    else
+      AvatarPlayerTextures[Index + 1] := NoAvatarTexture[Index + 1];
+
+    // the sing screen copied the pictures when it was built
+    if Assigned(screenSingViewRef) then
+      screenSingViewRef.AssignAvatarStatics(false);
+  end;
+
 begin
   // before the first song there is no Player array yet, but the microphones
   // the game is configured for can already be handed out
@@ -470,14 +486,21 @@ begin
     for I := 0 to Count - 1 do
     begin
       SetLength(PendingPhoto, IMaxPlayerCount);
+      SetLength(SlotPhoto, IMaxPlayerCount);
+
       if (PendingPhoto[I] <> '') then
       begin
         if (PendingPhoto[I] = '-') then
-          AvatarPlayerTextures[I + 1] := NoAvatarTexture[I + 1]
+          SlotPhoto[I] := nil
         else
-          AvatarPlayerTextures[I + 1] := Renderer.LoadTexture(Path(PendingPhoto[I]));
+          SlotPhoto[I] := Renderer.LoadTexture(Path(PendingPhoto[I]));
         PendingPhoto[I] := '';
-      end;
+        ApplyPhoto(I);
+      end
+      // the player setup screen hands every player the default avatar again,
+      // so put the picture back whenever something replaced it
+      else if (SlotPhoto[I] <> nil) and (AvatarPlayerTextures[I + 1] <> SlotPhoto[I]) then
+        ApplyPhoto(I);
 
       Wanted := PendingName[I];
       if (Wanted <> '') then
@@ -485,8 +508,10 @@ begin
         PendingName[I] := '';
         if (I < Length(Player)) then
           Player[I].Name := Wanted;
-        // so the next song starts with the name as well
+        // the player setup screen reloads the names from the file when it
+        // opens, so the name has to go there, not only into memory
         Ini.Name[I] := Wanted;
+        Ini.SaveNames;
 
         // the sing screen copies the names once when it opens
         if Assigned(ScreenSing) and (not Party.bPartyGame) then
@@ -636,14 +661,49 @@ end;
 
 {* The photo arrives as base64 from the page, which saves the server from
    having to understand multipart uploads. *}
+procedure SavePhoto(ID: cardinal; const PhotoBase64: UTF8String);
+var
+  Raw:     RawByteString;
+  Stream:  TBinaryFileStream;
+  Source:  TStringStream;
+  Decoder: TBase64DecodingStream;
+begin
+  if (PhotoBase64 = '') then
+    Exit;
+
+  Source := TStringStream.Create(PhotoBase64);
+  try
+    Decoder := TBase64DecodingStream.Create(Source);
+    try
+      SetLength(Raw, Decoder.Size);
+      if (Length(Raw) > 0) then
+        Decoder.Read(Raw[1], Length(Raw));
+    finally
+      Decoder.Free;
+    end;
+  finally
+    Source.Free;
+  end;
+
+  if (Length(Raw) = 0) then
+    Exit;
+
+  try
+    Stream := TBinaryFileStream.Create(RosterDir.Append(IntToStr(ID) + '.jpg'), fmCreate);
+    try
+      Stream.Write(Raw[1], Length(Raw));
+    finally
+      Stream.Free;
+    end;
+  except
+    Log.LogError('Could not write the photo of entry ' + IntToStr(ID), 'SavePhoto');
+  end;
+end;
+
 function TWebQueue.AddRosterEntry(const AName, PhotoBase64: UTF8String): cardinal;
 var
   Roster: TWebRosterArray;
   I, Len: integer;
-  Raw:    RawByteString;
-  Stream: TBinaryFileStream;
-  Source: TStringStream;
-  Decoder: TBase64DecodingStream;
 begin
   Result := 0;
   if (Trim(AName) = '') then
@@ -668,35 +728,56 @@ begin
     LeaveCriticalSection(Lock);
   end;
 
-  if (PhotoBase64 = '') then
+  SavePhoto(Result, PhotoBase64);
+end;
+
+{* Renames a saved singer or gives them another photo. An empty photo keeps
+   the one they have. *}
+function TWebQueue.UpdateRosterEntry(ID: cardinal; const AName, PhotoBase64: UTF8String): boolean;
+var
+  Roster: TWebRosterArray;
+  I: integer;
+begin
+  Result := false;
+  Roster := GetRoster;
+
+  for I := 0 to High(Roster) do
+    if (Roster[I].ID = ID) then
+    begin
+      if (Trim(AName) <> '') then
+        Roster[I].Name := OneLine(AName);
+      Result := true;
+      Break;
+    end;
+
+  if not Result then
     Exit;
 
-  Source := TStringStream.Create(PhotoBase64);
+  EnterCriticalSection(Lock);
   try
-    Decoder := TBase64DecodingStream.Create(Source);
-    try
-      SetLength(Raw, Decoder.Size);
-      if (Length(Raw) > 0) then
-        Decoder.Read(Raw[1], Length(Raw));
-    finally
-      Decoder.Free;
-    end;
+    WriteRoster(Roster);
   finally
-    Source.Free;
+    LeaveCriticalSection(Lock);
   end;
 
-  if (Length(Raw) = 0) then
-    Exit;
+  SavePhoto(ID, PhotoBase64);
 
+  // whoever wears this face right now gets the new one
+  EnterCriticalSection(Lock);
   try
-    Stream := TBinaryFileStream.Create(RosterDir.Append(IntToStr(Result) + '.jpg'), fmCreate);
-    try
-      Stream.Write(Raw[1], Length(Raw));
-    finally
-      Stream.Free;
-    end;
-  except
-    Log.LogError('Could not write the photo of ' + AName, 'TWebQueue.AddRosterEntry');
+    SetLength(SlotRoster, IMaxPlayerCount);
+    SetLength(PendingPhoto, IMaxPlayerCount);
+    SetLength(PendingName, IMaxPlayerCount);
+    for I := 0 to High(SlotRoster) do
+      if (SlotRoster[I] = ID) then
+      begin
+        if (PhotoBase64 <> '') then
+          PendingPhoto[I] := RosterDir.Append(IntToStr(ID) + '.jpg').ToUTF8;
+        if (Trim(AName) <> '') then
+          PendingName[I] := OneLine(AName);
+      end;
+  finally
+    LeaveCriticalSection(Lock);
   end;
 end;
 
@@ -735,6 +816,7 @@ begin
         SlotRoster[I]   := 0;
         PendingPhoto[I] := '-';
       end;
+    SetLength(SlotPhoto, IMaxPlayerCount);
   finally
     LeaveCriticalSection(Lock);
   end;

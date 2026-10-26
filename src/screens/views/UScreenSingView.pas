@@ -200,6 +200,7 @@ type
     function Draw: boolean;
 
     procedure SwapToScreen(Screen: integer);
+    procedure AssignAvatarStatics(CreateStatics: boolean);
 
     procedure WriteMessage(msg: UTF8String);
     procedure FadeMessage();
@@ -459,18 +460,6 @@ var
     nameStatic := ScreenSing.AddText(singPlayer.Name);
   end;
   // passing the integer for the static by reference is deliberate
-  procedure assignAvatarStatic(var singPlayer: TThemeSingPlayer; var avatarStatic: integer; var texture: TTexture);
-  begin
-    avatarStatic := ScreenSing.AddStaticAlphaRectangle(singPlayer.Avatar);
-    if (texture <> nil) then
-      ScreenSing.Statics[avatarStatic].Texture := texture.clone();
-    ScreenSing.Statics[avatarStatic].Texture.X := singPlayer.Avatar.X;
-    ScreenSing.Statics[avatarStatic].Texture.Y := singPlayer.Avatar.Y;
-    ScreenSing.Statics[avatarStatic].Texture.H := singPlayer.Avatar.H;
-    ScreenSing.Statics[avatarStatic].Texture.W := singPlayer.Avatar.W;
-    ScreenSing.Statics[avatarStatic].Texture.Z := singPlayer.Avatar.Z;
-    ScreenSing.Statics[avatarStatic].Texture.Alpha := singPlayer.Avatar.Alpha;
-  end;
 begin
   lastVolume:= -1;
   //too dangerous, a mouse button is quickly pressed by accident
@@ -614,6 +603,27 @@ begin
   ScreenSing.InfoMessageBG := ScreenSing.AddStatic(Theme.Sing.InfoMessageBG);
   ScreenSing.InfoMessageText := ScreenSing.AddText(Theme.Sing.InfoMessageText);
 
+  AssignAvatarStatics(true);
+end;
+
+{* The avatar pictures of the sing screen. Called once while the screen is
+   built, and again whenever a player gets another picture - the statics hold
+   their own copy of the texture, so they have to be told. *}
+procedure TScreenSingView.AssignAvatarStatics(CreateStatics: boolean);
+  procedure assignAvatarStatic(var singPlayer: TThemeSingPlayer; var avatarStatic: integer; var texture: TTexture);
+  begin
+    if CreateStatics then
+      avatarStatic := ScreenSing.AddStaticAlphaRectangle(singPlayer.Avatar);
+    if (texture <> nil) then
+      ScreenSing.Statics[avatarStatic].Texture := texture.clone();
+    ScreenSing.Statics[avatarStatic].Texture.X := singPlayer.Avatar.X;
+    ScreenSing.Statics[avatarStatic].Texture.Y := singPlayer.Avatar.Y;
+    ScreenSing.Statics[avatarStatic].Texture.H := singPlayer.Avatar.H;
+    ScreenSing.Statics[avatarStatic].Texture.W := singPlayer.Avatar.W;
+    ScreenSing.Statics[avatarStatic].Texture.Z := singPlayer.Avatar.Z;
+    ScreenSing.Statics[avatarStatic].Texture.Alpha := singPlayer.Avatar.Alpha;
+  end;
+begin
   // avatars
   // SCREEN 1
   // 1P

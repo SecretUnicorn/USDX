@@ -965,6 +965,16 @@ begin
     Exit;
   end;
 
+  if (Method = 'POST') and (Target = '/api/roster/update') then
+  begin
+    SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
+      '{"ok":' + IfThen(WebQueue.UpdateRosterEntry(ParamToID(Body, 'id'),
+                                                   GetParam(Body, 'name'),
+                                                   GetParam(Body, 'photo')),
+                        'true', 'false') + '}');
+    Exit;
+  end;
+
   if (Method = 'POST') and (Target = '/api/roster/delete') then
   begin
     SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',

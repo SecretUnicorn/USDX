@@ -21,6 +21,8 @@ Unreleased
   forgives typos in short words as well, with exact matches listed first
 - the web server shows the songs guests asked for at /wuensche, and the title
   of every page is a menu to the other pages
+- a saved singer can be renamed or given a photo afterwards, and the photo now
+  survives the player setup screen, which hands out the default avatars again
 - the player page keeps a list of singers with a photo each: one card per
   microphone, tap it to hand the microphone to somebody else, add a new singer
   with a picture from the phone. The picture is used in the game as the avatar
