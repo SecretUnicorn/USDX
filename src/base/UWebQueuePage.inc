@@ -395,7 +395,8 @@ begin
     // the Syncer offers no way back for a song it thinks it has, so the row
     // can only say so instead of promising a download
     S.Add('if(x.have){var h=document.createElement("div");h.className="have";');
-    S.Add('h.textContent="The Syncer has it, the game does not";');
+    S.Add('h.textContent="The Syncer counts this one as downloaded - it takes a '
+          + 'Redownload in the Syncer itself";');
     S.Add('li.appendChild(meta);li.appendChild(h);return li;}');
     S.Add('var b=document.createElement("button");b.className="get";b.textContent="Download";');
     S.Add('b.onclick=function(){usdbGet(x,b);};');
