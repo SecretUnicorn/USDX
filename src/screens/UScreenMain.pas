@@ -116,6 +116,13 @@ begin
         UGraphic.LoadScreens(USDXVersionStr);
       end;
 
+      SDLK_M: begin
+        Songs.ForceReload;
+        ScreenPopupInfo.ShowPopup(Format(Language.Translate('MAIN_SONGS_RELOADED'),
+                                         [Songs.SongList.Count]));
+        Exit;
+      end;
+
       SDLK_T: begin
         FadeTo(@ScreenStatMain, SoundLib.Start);
         Exit;

@@ -129,6 +129,11 @@ type
     {* Rebuilds the covers of the song screen. Costs about as much as a start
        up, so it runs after the caller has reported the new songs. *}
     procedure RefreshSongScreen;
+
+    {* Reads every song file again, the known ones included. A txt that
+       changed while the game was running is otherwise as old as its last
+       read. Main thread, and the game stands still while it runs. *}
+    procedure ForceReload;
   procedure FindFilesByExtension(const Dir: IPath; const Ext: IPath; Recursive: Boolean; var Files: TPathDynArray);
     procedure Sort(Order: TSortingType);
     property  Processing: boolean read fProcessing;
@@ -369,6 +374,21 @@ begin
   Resume();
 end;
 
+procedure TSongs.ForceReload;
+var
+  I: integer;
+begin
+  if fProcessing then
+    Exit;
+
+  for I := 0 to SongList.Count - 1 do
+    TSong(SongList[I]).Free;
+  SongList.Clear;
+
+  // the same walk the game does when it starts, screens and covers included
+  int_LoadSongList;
+end;
+
 procedure TSongs.RefreshSongScreen;
 begin
   if Assigned(ScreenSong) then
@@ -530,12 +550,16 @@ begin
   else
   begin
     Log.LogError('AnalyseFile failed for "' + FilePath.ToNative + '".');
+    // a file lying loose in the song folder is somebody's leftover, not a song
+    if not LooseSongFile(FilePath.ToUTF8()) then
+    begin
     SetLength(Broken, Length(Broken) + 1);
     Broken[High(Broken)].Path := FilePath.ToUTF8();
     if (Song.LoadProblem <> '') then
       Broken[High(Broken)].Problem := Song.LoadProblem
     else
       Broken[High(Broken)].Problem := 'The game could not read this song';
+    end;
     FreeAndNil(Song);
   end;
 end;
