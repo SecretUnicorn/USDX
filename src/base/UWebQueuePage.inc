@@ -67,6 +67,7 @@ begin
     S.Add('.mini{padding:5px 10px;font-size:12px;border-radius:7px;}');
     S.Add('#usdb h3{font-size:13px;text-transform:uppercase;letter-spacing:.09em;');
     S.Add('color:var(--dim);margin:14px 0 8px;font-weight:600;}');
+    S.Add('#usdb .warn{color:var(--accent);font-size:13px;padding:10px 2px;}');
     S.Add('button.get{background:var(--panel2);border-color:var(--accent2);');
     S.Add('color:var(--accent2);font-weight:700;font-size:13px;white-space:nowrap;}');
     S.Add('.tag.today{color:var(--accent);}');
@@ -352,6 +353,11 @@ begin
     S.Add('if(!query.trim()){return;}');
     S.Add('fetch("/api/usdb?q="+encodeURIComponent(query)).then(function(r){return r.json();})');
     S.Add('.then(function(d){');
+    // a configured Syncer that stays silent is worth saying out loud, or the
+    // guest only ever sees "nothing found"
+    S.Add('if(d.error){var w=document.createElement("div");w.className="warn";');
+    S.Add('w.textContent=d.error+" - is its web server running?";');
+    S.Add('elUsdb.appendChild(w);return;}');
     S.Add('if(d.off||!d.songs||!d.songs.length){return;}');
     S.Add('var h=document.createElement("h3");h.textContent="Not in the collection - from USDB";');
     S.Add('elUsdb.appendChild(h);');
@@ -383,6 +389,8 @@ begin
     S.Add('fetch("/api/usdb/status?id="+x.song_id+"&q="+encodeURIComponent(query))');
     S.Add('.then(function(r){return r.json();})');
     S.Add('.then(function(d){');
+    S.Add('if(d.error){clearInterval(poll);b.disabled=false;b.textContent="Download";');
+    S.Add('toast(d.error);return;}');
     S.Add('var st=(d.status||"").toLowerCase();');
     S.Add('if(st.indexOf("fail")>=0){clearInterval(poll);b.disabled=false;');
     S.Add('b.textContent="Download";toast("The download failed");return;}');
