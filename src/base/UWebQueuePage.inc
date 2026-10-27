@@ -69,6 +69,7 @@ begin
     S.Add('color:var(--dim);margin:14px 0 8px;font-weight:600;}');
     S.Add('#usdb .warn{color:var(--accent);font-size:13px;padding:10px 2px;}');
     S.Add('#usdb .mini,#usdb .empty{margin-top:12px;}');
+    S.Add('#usdb .have{flex:none;max-width:40%;color:var(--dim);font-size:12px;text-align:right;line-height:1.3;}');
     S.Add('button.get{background:var(--panel2);border-color:var(--accent2);');
     S.Add('color:var(--accent2);font-weight:700;font-size:13px;white-space:nowrap;}');
     S.Add('.tag.today{color:var(--accent);}');
@@ -391,6 +392,11 @@ begin
     S.Add('var bits=[x.artist];if(x.year){bits.push(x.year);}if(x.language){bits.push(x.language);}');
     S.Add('sn.textContent=bits.join(" · ");sub.appendChild(sn);');
     S.Add('meta.appendChild(t);meta.appendChild(sub);');
+    // the Syncer offers no way back for a song it thinks it has, so the row
+    // can only say so instead of promising a download
+    S.Add('if(x.have){var h=document.createElement("div");h.className="have";');
+    S.Add('h.textContent="The Syncer has it, the game does not";');
+    S.Add('li.appendChild(meta);li.appendChild(h);return li;}');
     S.Add('var b=document.createElement("button");b.className="get";b.textContent="Download";');
     S.Add('b.onclick=function(){usdbGet(x,b);};');
     S.Add('li.appendChild(meta);li.appendChild(b);return li;}');
@@ -411,7 +417,10 @@ begin
     S.Add('if(st.indexOf("fail")>=0){clearInterval(poll);b.disabled=false;');
     S.Add('b.textContent="Download";toast("The download failed");return;}');
     S.Add('if(st.indexOf("synchron")<0&&st.indexOf("outdated")<0&&tries<180){return;}');
-    S.Add('clearInterval(poll);b.textContent="Adding...";');
+    S.Add('clearInterval(poll);b.textContent="Adding...";grab(x,b,3);');
+    S.Add('});},3000);');
+    S.Add('}).catch(function(){b.disabled=false;b.textContent="Download";toast("Connection lost");});}');
+    S.Add('function grab(x,b,left){');
     S.Add('post("/api/library/refresh",{}).then(function(){');
     S.Add('var rp=setInterval(function(){');
     S.Add('fetch("/api/library/refresh").then(function(r){return r.json();}).then(function(f){');
@@ -426,12 +435,14 @@ begin
     S.Add('if(q.ok){b.textContent="In the queue";loadQueue(true);');
     S.Add('toast(x.title+" is in the queue");}');
     S.Add('else{toast(x.title+" can be sung now");}});}');
-    S.Add('else{toast(x.title+" can be sung now");}}');
-    S.Add('else{b.disabled=false;b.textContent="Download";');
-    S.Add('toast(x.title+" arrived without audio, the game cannot use it");}');
-    S.Add('});},1500);});');
-    S.Add('});},3000);');
-    S.Add('}).catch(function(){b.disabled=false;b.textContent="Download";toast("Connection lost");});}');
+    S.Add('else{toast(x.title+" can be sung now");}return;}');
+    // the Syncer lets go of a song a moment before its last file is written,
+    // so an empty collection right now does not mean the download was useless
+    S.Add('if(left>1){b.textContent="Waiting for the files...";');
+    S.Add('setTimeout(function(){grab(x,b,left-1);},4000);return;}');
+    S.Add('b.disabled=false;b.textContent="Download";');
+    S.Add('toast(x.title+" arrived without audio, the game cannot use it");');
+    S.Add('});},1500);});}');
     S.Add('elSearch.addEventListener("input",function(){');
     S.Add('clearTimeout(timer);');
     S.Add('timer=setTimeout(function(){query=elSearch.value;loadSongs(true);},250);});');

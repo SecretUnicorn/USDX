@@ -1090,15 +1090,15 @@ begin
       Exit;
     end;
 
-    // already in the collection, nothing to offer
-    if (Pos(Offer, Row) = 0) then
-      Continue;
-
+    { A row without a download button is one the Syncer believes it already
+      has. It is still worth listing: the song is plainly not in the
+      collection, and saying nothing at all looks like a broken search. }
     I := 1;
     Fields := '{"song_id":' + IntToStr(ID) +
               ',"artist":"' + JsonEscape(NextCell(I)) + '"' +
               ',"title":"'  + JsonEscape(NextCell(I)) + '"' +
-              ',"year":"'   + JsonEscape(NextCell(I)) + '"}';
+              ',"year":"'   + JsonEscape(NextCell(I)) + '"' +
+              IfThen(Pos(Offer, Row) = 0, ',"have":true', '') + '}';
     if (Count > 0) then
       Json := Json + ',';
     Json := Json + Fields;
