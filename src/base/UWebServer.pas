@@ -1243,6 +1243,8 @@ var
   Total, Offset, Limit, Added: integer;
   Answer: RawByteString;
   Problem: UTF8String;
+  FreshIds: TSongIDArray;
+  Fresh: integer;
 begin
   Target := RequestPath;
   Query  := '';
@@ -1376,9 +1378,19 @@ begin
 
   if (Method = 'GET') and (Target = '/api/library/refresh') then
   begin
-    if WebQueue.TakeRefreshResult(Added) then
+    if WebQueue.TakeRefreshResult(Added, FreshIds) then
+    begin
+      Answer := '';
+      for Fresh := 0 to High(FreshIds) do
+      begin
+        if (Fresh > 0) then
+          Answer := Answer + ',';
+        Answer := Answer + IntToStr(FreshIds[Fresh]);
+      end;
       SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
-                   '{"done":true,"added":' + IntToStr(Added) + '}')
+                   '{"done":true,"added":' + IntToStr(Added) +
+                   ',"ids":[' + Answer + ']}')
+    end
     else
       SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', '{"done":false}');
     Exit;

@@ -65,6 +65,7 @@ type
     SearchText: UTF8String; // lower case ASCII, used for the web search
   end;
   TWebSongArray = array of TWebSong;
+  TSongIDArray = array of cardinal;
 
   {* A song that has been requested through the web page. *}
   TWebQueueEntry = record
@@ -113,6 +114,7 @@ type
       RefreshWanted: boolean;  // the page asked to look for new songs
       RefreshDone:   boolean;
       RefreshAdded:  integer;
+      RefreshIds:    TSongIDArray;  // what the refresh brought, for the page to queue
       Entries:     TWebQueueEntryArray;
       NextEntryID: cardinal;
       fRevision:   cardinal; // bumped on every change so the web page can poll cheaply
@@ -148,9 +150,10 @@ type
          back when the game starts. Main thread. *}
       {* The page asked for a library refresh, the main thread does it. *}
       procedure RequestLibraryRefresh;
-      function  TakeRefreshResult(out Added: integer): boolean;
+      function  TakeRefreshResult(out Added: integer; out Ids: TSongIDArray): boolean;
       function  RefreshRequested: boolean;
-      procedure RefreshFinished(Added: integer);
+      procedure CopySongIds(out Ids: TSongIDArray);
+      procedure RefreshFinished(Added: integer; const Before: TSongIDArray);
 
       procedure LoadQueue;
       procedure SaveQueueIfChanged;
@@ -1762,24 +1765,62 @@ begin
   end;
 end;
 
-procedure TWebQueue.RefreshFinished(Added: integer);
+procedure TWebQueue.CopySongIds(out Ids: TSongIDArray);
+var
+  I: integer;
+begin
+  EnterCriticalSection(Lock);
+  try
+    SetLength(Ids, Length(SongIndex));
+    for I := 0 to High(SongIndex) do
+      Ids[I] := SongIndex[I].ID;
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+end;
+
+{* Before is the state of the collection before the refresh, so whatever is in
+   the index now and was not then is what the refresh brought. *}
+procedure TWebQueue.RefreshFinished(Added: integer; const Before: TSongIDArray);
+var
+  I, J: integer;
+  Knew: boolean;
 begin
   EnterCriticalSection(Lock);
   try
     RefreshAdded := Added;
     RefreshDone  := true;
+
+    SetLength(RefreshIds, 0);
+    for I := 0 to High(SongIndex) do
+    begin
+      Knew := false;
+      for J := 0 to High(Before) do
+        if (Before[J] = SongIndex[I].ID) then
+        begin
+          Knew := true;
+          Break;
+        end;
+
+      if not Knew then
+      begin
+        SetLength(RefreshIds, Length(RefreshIds) + 1);
+        RefreshIds[High(RefreshIds)] := SongIndex[I].ID;
+      end;
+    end;
   finally
     LeaveCriticalSection(Lock);
   end;
 end;
 
 {* True once the refresh has run, with the number of songs it found. *}
-function TWebQueue.TakeRefreshResult(out Added: integer): boolean;
+function TWebQueue.TakeRefreshResult(out Added: integer; out Ids: TSongIDArray): boolean;
 begin
   EnterCriticalSection(Lock);
   try
     Result := RefreshDone;
     Added  := RefreshAdded;
+    Ids    := Copy(RefreshIds, 0, Length(RefreshIds));
     if Result then
       RefreshDone := false;
   finally
@@ -2292,6 +2333,7 @@ end;
 procedure ProcessWebQueueRequest;
 var
   Added: integer;
+  IdsBefore: TSongIDArray;
 begin
   if Assigned(WebQueue) then
   begin
@@ -2300,9 +2342,10 @@ begin
 
     if WebQueue.RefreshRequested and Assigned(Songs) then
     begin
+      WebQueue.CopySongIds(IdsBefore);
       Added := Songs.LoadNewSongs;
       // tell the page before rebuilding the song screen, that part is slow
-      WebQueue.RefreshFinished(Added);
+      WebQueue.RefreshFinished(Added, IdsBefore);
       if (Added > 0) then
         Songs.RefreshSongScreen;
     end;

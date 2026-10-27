@@ -420,7 +420,13 @@ begin
     // the Syncer calls a download done even when it only got the video, so
     // only the library tells us whether the song is really singable
     S.Add('if(f.added>0){b.textContent="In the collection";');
-    S.Add('toast(x.title+" can be sung now");}');
+    // whoever waited for a download wants to sing it, not look for it again
+    S.Add('if(f.ids&&f.ids.length&&hasName()){');
+    S.Add('post("/api/queue/add",{id:f.ids[0],singer:elSinger.value}).then(function(q){');
+    S.Add('if(q.ok){b.textContent="In the queue";loadQueue(true);');
+    S.Add('toast(x.title+" is in the queue");}');
+    S.Add('else{toast(x.title+" can be sung now");}});}');
+    S.Add('else{toast(x.title+" can be sung now");}}');
     S.Add('else{b.disabled=false;b.textContent="Download";');
     S.Add('toast(x.title+" arrived without audio, the game cannot use it");}');
     S.Add('});},1500);});');
