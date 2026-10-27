@@ -68,6 +68,7 @@ begin
     S.Add('#usdb h3{font-size:13px;text-transform:uppercase;letter-spacing:.09em;');
     S.Add('color:var(--dim);margin:14px 0 8px;font-weight:600;}');
     S.Add('#usdb .warn{color:var(--accent);font-size:13px;padding:10px 2px;}');
+    S.Add('#usdb .mini,#usdb .empty{margin-top:12px;}');
     S.Add('button.get{background:var(--panel2);border-color:var(--accent2);');
     S.Add('color:var(--accent2);font-weight:700;font-size:13px;white-space:nowrap;}');
     S.Add('.tag.today{color:var(--accent);}');
@@ -290,8 +291,11 @@ begin
     S.Add('offset+=data.songs.length;');
     S.Add('elMore.hidden=offset>=total;');
     S.Add('document.getElementById("sempty").hidden=total>0;');
-    // only what the collection does not have is worth offering from USDB
-    S.Add('if(total>0){elUsdb.innerHTML="";}else{usdbSearch();}');
+    // with nothing in the collection USDB is the only hope, with a handful of
+    // hits it is worth offering, beyond that it would only be in the way
+    S.Add('if(total===0){usdbSearch(false);}');
+    S.Add('else if(total<5){usdbOffer();}');
+    S.Add('else{elUsdb.innerHTML="";}');
     S.Add('}).catch(function(){loading=false;});}');
     S.Add('function applyView(){');
     S.Add('elSongs.className="view-"+view;');
@@ -348,17 +352,29 @@ begin
     // the USDB Syncer, when the host runs one: what is not in the collection
     // can be searched there and downloaded into it
     S.Add('var elUsdb=document.getElementById("usdb");');
-    S.Add('function usdbSearch(){');
+    S.Add('function usdbNote(t){var n=document.createElement("div");n.className="empty";');
+    S.Add('n.textContent=t;elUsdb.appendChild(n);}');
+    S.Add('function usdbOffer(){');
     S.Add('elUsdb.innerHTML="";');
     S.Add('if(!query.trim()){return;}');
+    S.Add('var b=document.createElement("button");b.className="mini";');
+    S.Add('b.textContent="Look on USDB too";');
+    S.Add('b.onclick=function(){usdbSearch(true);};');
+    S.Add('elUsdb.appendChild(b);}');
+    S.Add('function usdbSearch(manual){');
+    S.Add('elUsdb.innerHTML="";');
+    S.Add('if(!query.trim()){return;}');
+    S.Add('if(manual){usdbNote("Asking USDB...");}');
     S.Add('fetch("/api/usdb?q="+encodeURIComponent(query)).then(function(r){return r.json();})');
     S.Add('.then(function(d){');
     // a configured Syncer that stays silent is worth saying out loud, or the
     // guest only ever sees "nothing found"
     S.Add('if(d.error){var w=document.createElement("div");w.className="warn";');
     S.Add('w.textContent=d.error+" - is its web server running?";');
-    S.Add('elUsdb.appendChild(w);return;}');
-    S.Add('if(d.off||!d.songs||!d.songs.length){return;}');
+    S.Add('elUsdb.innerHTML="";elUsdb.appendChild(w);return;}');
+    S.Add('elUsdb.innerHTML="";');
+    S.Add('if(d.off||!d.songs||!d.songs.length){');
+    S.Add('if(manual){usdbNote("Nothing on USDB for this search.");}return;}');
     S.Add('var h=document.createElement("h3");h.textContent="Not in the collection - from USDB";');
     S.Add('elUsdb.appendChild(h);');
     S.Add('var ul=document.createElement("ul");');
