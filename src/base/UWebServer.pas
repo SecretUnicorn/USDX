@@ -992,6 +992,115 @@ begin
   end;
 end;
 
+{* The Syncer serves its own UI with htmx, so a song list arrives as table
+   rows rather than JSON - its /api/songs answers with an error. A row carries
+   everything the page needs: the id in the like button, artist, title and year
+   in the three plain cells, and a download button only while the song is
+   missing from the collection. *}
+function SyncerRows(const Search: RawByteString; WantID: integer;
+                    out Json: RawByteString): boolean;
+const
+  Cell  = '<td class="px-1 md:px-4">';
+  Like  = 'hx-put="/fragments/songs/';
+  Offer = 'title="Request download"';
+var
+  Page, Row, Fields: RawByteString;
+  Start, Stop, At, I, ID: integer;
+  Count: integer;
+
+  // the cells hold plain text, but an ampersand or a quote arrives encoded
+  function Plain(const S: RawByteString): RawByteString;
+  begin
+    Result := StringReplace(S, '&#39;', '''', [rfReplaceAll]);
+    Result := StringReplace(Result, '&quot;', '"', [rfReplaceAll]);
+    Result := StringReplace(Result, '&lt;', '<', [rfReplaceAll]);
+    Result := StringReplace(Result, '&gt;', '>', [rfReplaceAll]);
+    Result := StringReplace(Result, '&#34;', '"', [rfReplaceAll]);
+    Result := Trim(StringReplace(Result, '&amp;', '&', [rfReplaceAll]));
+  end;
+
+  function NextCell(var From: integer): RawByteString;
+  var
+    A, B: integer;
+  begin
+    Result := '';
+    A := PosEx(Cell, Row, From);
+    if (A = 0) then
+      Exit;
+    A := A + Length(Cell);
+    B := PosEx('</td>', Row, A);
+    if (B = 0) then
+      Exit;
+    From := B;
+    Result := Plain(Copy(Row, A, B - A));
+  end;
+
+begin
+  Result := false;
+  Json := '';
+
+  if not HttpAsk('GET', '/fragments/songs?offset=0&limit=25&sort_by=artist' +
+                        '&sort_order=asc&search=' + UrlEncode(Search), '', Page) then
+    Exit;
+
+  Result := true;
+  Count := 0;
+  Start := Pos('<tr', Page);
+
+  while (Start > 0) and (Count < 25) do
+  begin
+    Stop := PosEx('<tr', Page, Start + 3);
+    if (Stop = 0) then
+      Row := Copy(Page, Start, Length(Page))
+    else
+      Row := Copy(Page, Start, Stop - Start);
+    Start := Stop;
+
+    At := Pos(Like, Row);
+    if (At = 0) then
+      Continue;
+    // the id is zero padded and followed by /like
+    I := At + Length(Like);
+    ID := 0;
+    while (I <= Length(Row)) and (Row[I] in ['0'..'9']) do
+    begin
+      ID := ID * 10 + (Ord(Row[I]) - Ord('0'));
+      Inc(I);
+    end;
+    if (ID = 0) then
+      Continue;
+
+    if (WantID > 0) then
+    begin
+      if (ID <> WantID) then
+        Continue;
+      // no download button left means the Syncer has it on disk
+      if (Pos(Offer, Row) > 0) then
+        Json := '{"status":"Downloading"}'
+      else
+        Json := '{"status":"Synchronized"}';
+      Exit;
+    end;
+
+    // already in the collection, nothing to offer
+    if (Pos(Offer, Row) = 0) then
+      Continue;
+
+    I := 1;
+    Fields := '{"song_id":' + IntToStr(ID) +
+              ',"artist":"' + JsonEscape(NextCell(I)) + '"' +
+              ',"title":"'  + JsonEscape(NextCell(I)) + '"' +
+              ',"year":"'   + JsonEscape(NextCell(I)) + '"}';
+    if (Count > 0) then
+      Json := Json + ',';
+    Json := Json + Fields;
+    Inc(Count);
+  end;
+
+  if (WantID > 0) and (Json = '') then
+    Json := '{"status":"None"}';
+end;
+
 procedure TWebServerThread.SendPhoto(Sock: longint; ID: cardinal);
 var
   Photo: UTF8String;
@@ -1063,10 +1172,9 @@ begin
   begin
     if (Ini.WebQueueSyncer = '') then
       SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', '{"off":true}')
-    else if HttpAsk('GET', '/api/songs?limit=25&search=' + UrlEncode(GetParam(Query, 'q')),
-                    '', Answer) then
+    else if SyncerRows(GetParam(Query, 'q'), 0, Answer) then
       SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
-                   '{"songs":' + Answer + '}')
+                   '{"songs":[' + Answer + ']}')
     else
       SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
                    '{"error":"The USDB Syncer did not answer"}');
@@ -1075,9 +1183,10 @@ begin
 
   if (Method = 'POST') and (Target = '/api/usdb/download') then
   begin
-    if HttpAsk('POST', '/api/songs/' + IntToStr(ParamToID(Body, 'id')) + '/download',
-               '', Answer) then
-      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', Answer)
+    if HttpAsk('POST', '/fragments/songs/' + IntToStr(ParamToID(Body, 'id')) +
+                       '/download', '', Answer) then
+      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
+                   '{"status":"Downloading"}')
     else
       SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
                    '{"error":"The download could not be started"}');
@@ -1086,8 +1195,7 @@ begin
 
   if (Method = 'GET') and (Target = '/api/usdb/status') then
   begin
-    if HttpAsk('GET', '/api/songs/' + IntToStr(ParamToID(Query, 'id')) + '/download',
-               '', Answer) then
+    if SyncerRows(GetParam(Query, 'q'), ParamToID(Query, 'id'), Answer) then
       SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', Answer)
     else
       SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',

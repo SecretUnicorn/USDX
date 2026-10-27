@@ -380,7 +380,8 @@ begin
     S.Add('var tries=0;');
     S.Add('var poll=setInterval(function(){');
     S.Add('tries++;');
-    S.Add('fetch("/api/usdb/status?id="+x.song_id).then(function(r){return r.json();})');
+    S.Add('fetch("/api/usdb/status?id="+x.song_id+"&q="+encodeURIComponent(query))');
+    S.Add('.then(function(r){return r.json();})');
     S.Add('.then(function(d){');
     S.Add('var st=(d.status||"").toLowerCase();');
     S.Add('if(st.indexOf("fail")>=0){clearInterval(poll);b.disabled=false;');
