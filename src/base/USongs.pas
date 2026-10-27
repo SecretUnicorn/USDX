@@ -132,8 +132,9 @@ type
 
     {* Reads every song file again, the known ones included. A txt that
        changed while the game was running is otherwise as old as its last
-       read. Main thread, and the game stands still while it runs. *}
-    procedure ForceReload;
+       read. Reports what came and went. Main thread, and the game stands
+       still while it runs. *}
+    procedure ForceReload(out Added, Removed: integer);
   procedure FindFilesByExtension(const Dir: IPath; const Ext: IPath; Recursive: Boolean; var Files: TPathDynArray);
     procedure Sort(Order: TSortingType);
     property  Processing: boolean read fProcessing;
@@ -374,19 +375,49 @@ begin
   Resume();
 end;
 
-procedure TSongs.ForceReload;
+procedure TSongs.ForceReload(out Added, Removed: integer);
 var
-  I: integer;
+  Before: TStringList;
+  I:      integer;
+
+  // the file a song was read from, the one thing that survives the reload
+  function SongFile(Index: integer): UTF8String;
+  begin
+    Result := '';
+    with TSong(SongList[Index]) do
+      if (Path <> nil) and (FileName <> nil) then
+        Result := Path.Append(FileName).ToUTF8();
+  end;
+
 begin
+  Added   := 0;
+  Removed := 0;
   if fProcessing then
     Exit;
 
-  for I := 0 to SongList.Count - 1 do
-    TSong(SongList[I]).Free;
-  SongList.Clear;
+  Before := TStringList.Create;
+  try
+    Before.Sorted := true;
+    Before.Duplicates := dupIgnore;
+    for I := 0 to SongList.Count - 1 do
+      Before.Add(SongFile(I));
 
-  // the same walk the game does when it starts, screens and covers included
-  int_LoadSongList;
+    for I := 0 to SongList.Count - 1 do
+      TSong(SongList[I]).Free;
+    SongList.Clear;
+
+    // the same walk the game does when it starts, screens and covers included
+    int_LoadSongList;
+
+    for I := 0 to SongList.Count - 1 do
+      if (Before.IndexOf(SongFile(I)) < 0) then
+        Inc(Added);
+
+    // everything that was there and did not come back again
+    Removed := Before.Count - (SongList.Count - Added);
+  finally
+    Before.Free;
+  end;
 end;
 
 procedure TSongs.RefreshSongScreen;

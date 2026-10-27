@@ -85,6 +85,8 @@ uses
 
 function TScreenMain.ParseInput(PressedKey: Cardinal; CharCode: UCS4Char;
   PressedDown: boolean): boolean;
+var
+  SongsAdded, SongsRemoved: integer;
 begin
   Result := true;
 
@@ -117,9 +119,9 @@ begin
       end;
 
       SDLK_M: begin
-        Songs.ForceReload;
+        Songs.ForceReload(SongsAdded, SongsRemoved);
         ScreenPopupInfo.ShowPopup(Format(Language.Translate('MAIN_SONGS_RELOADED'),
-                                         [Songs.SongList.Count]));
+                                  [Songs.SongList.Count, SongsAdded, SongsRemoved]));
         Exit;
       end;
 
