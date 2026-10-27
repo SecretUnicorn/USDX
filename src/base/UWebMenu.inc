@@ -36,6 +36,7 @@ begin
   Entry('/players', 'Players');
   Entry('/wuensche', 'Song wishes');
   Entry('/broken', 'Broken songs');
+  Entry('/videos', 'Unused videos');
   S.Add('</menu>');
   S.Add('</details>');
 end;

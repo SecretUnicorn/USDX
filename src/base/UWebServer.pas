@@ -148,6 +148,9 @@ const
 {$IFDEF DARWIN}
 const
   // <sys/socket.h>, not exported by every FPC version
+  AudioKinds = '.mp3 .ogg .m4a .opus .wav .flac .aac .wma ';
+  VideoKinds = '.mp4 .webm .mkv .avi .mov .m4v .mpg .mpeg .ogv .wmv .flv .divx ';
+
   USDX_SO_NOSIGPIPE = $1022;
 {$ENDIF}
 
@@ -168,6 +171,7 @@ var
   CachedPage: RawByteString = '';
   CachedPlayersPage: RawByteString = '';
   CachedBrokenPage: RawByteString = '';
+  CachedVideoPage: RawByteString = '';
   CachedWishesPage:  RawByteString = '';
   ActiveClients: longint = 0;
   ThumbLock: TRTLCriticalSection;
@@ -176,6 +180,7 @@ var
 {$I UWebQueuePage.inc}
 {$I UWebPlayersPage.inc}
 {$I UWebBrokenPage.inc}
+{$I UWebVideoPage.inc}
 {$I UWebWishesPage.inc}
 
 { small helpers }
@@ -1104,11 +1109,10 @@ begin
     Json := '{"status":"None"}';
 end;
 
-{* An audio file lying next to a song the game refused: then only the tag is
-   missing and throwing the folder away would waste a good download. *}
-function FindAudioIn(const TxtPath: UTF8String): UTF8String;
-const
-  Audio = '.mp3 .ogg .m4a .opus .wav .flac .aac .wma ';
+{* A file of the given kind lying next to a song file. Used to tell a folder
+   that only misses a tag from one that really has nothing. The extensions
+   are a blank separated list, each with its dot. *}
+function FindFileIn(const TxtPath, Kinds: UTF8String): UTF8String;
 var
   Search: TSearchRec;
   Ext:    UTF8String;
@@ -1120,11 +1124,63 @@ begin
       // a name without extension would match the blank between the entries
       Ext := LowerCase(ExtractFileExt(Search.Name));
       if ((Search.Attr and faDirectory) = 0) and (Ext <> '') and
-         (Pos(Ext + ' ', Audio) > 0) then
+         (Pos(Ext + ' ', Kinds) > 0) then
         Result := Search.Name;
     until (Result <> '') or (FindNext(Search) <> 0);
     FindClose(Search);
   end;
+end;
+
+{* The game reads a song file once at startup, so a tag written since then
+   is only in the file. Asking the file keeps the list from offering the same
+   song again after it was fixed. *}
+function TxtHasVideoTag(const TxtPath: UTF8String): boolean;
+var
+  Stream: TBinaryFileStream;
+  Head:   RawByteString;
+begin
+  Result := false;
+  try
+    Stream := TBinaryFileStream.Create(Path(TxtPath), fmOpenRead);
+    try
+      SetLength(Head, Min(8192, Stream.Size));
+      if (Length(Head) > 0) then
+        Stream.Read(Head[1], Length(Head));
+    finally
+      Stream.Free;
+    end;
+  except
+    Exit;
+  end;
+
+  Result := Pos('#VIDEO', UpperCase(Head)) > 0;
+end;
+
+{* The songs with a video in the folder that the txt does not mention, for
+   the /videos page. *}
+function VideolessJson: RawByteString;
+var
+  Songs: TWebSongArray;
+  Video: UTF8String;
+  I:     integer;
+begin
+  WebQueue.CopyVideoless(Songs);
+
+  Result := '';
+  for I := 0 to High(Songs) do
+  begin
+    Video := FindFileIn(Songs[I].Path, VideoKinds);
+    if (Video = '') or TxtHasVideoTag(Songs[I].Path) then
+      Continue;
+
+    if (Result <> '') then
+      Result := Result + ',';
+    Result := Result + '{"path":"' + JsonEscape(Songs[I].Path) +
+              '","artist":"' + JsonEscape(Songs[I].Artist) +
+              '","title":"' + JsonEscape(Songs[I].Title) +
+              '","video":"' + JsonEscape(Video) + '"}';
+  end;
+  Result := '{"songs":[' + Result + ']}';
 end;
 
 {* The song files the game refused, for the /broken page. *}
@@ -1142,7 +1198,7 @@ begin
       Result := Result + ',';
     Result := Result + '{"path":"' + JsonEscape(Songs[I].Path) +
               '","problem":"' + JsonEscape(Songs[I].Problem) +
-              '","audio":"' + JsonEscape(FindAudioIn(Songs[I].Path)) + '"' +
+              '","audio":"' + JsonEscape(FindFileIn(Songs[I].Path, AudioKinds)) + '"' +
               IfThen(LooseSongFile(Songs[I].Path), ',"loose":true', '') + '}';
   end;
   Result := '{"songs":[' + Result + ']}';
@@ -1224,6 +1280,28 @@ begin
   if (Method = 'GET') and (Target = '/api/broken') then
   begin
     SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', BrokenJson);
+    Exit;
+  end;
+
+  if (Method = 'GET') and (Target = '/videos') then
+  begin
+    SendResponse(Sock, '200 OK', 'text/html; charset=utf-8', CachedVideoPage);
+    Exit;
+  end;
+
+  if (Method = 'GET') and (Target = '/api/videoless') then
+  begin
+    SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', VideolessJson);
+    Exit;
+  end;
+
+  if (Method = 'POST') and (Target = '/api/videoless/fix') then
+  begin
+    if WebQueue.AddVideoTag(GetParam(Body, 'path'), GetParam(Body, 'video'), Problem) then
+      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', '{"ok":true}')
+    else
+      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
+                   '{"error":"' + JsonEscape(Problem) + '"}');
     Exit;
   end;
 
@@ -1497,6 +1575,8 @@ begin
     CachedPlayersPage := BuildWebPlayersPage;
   if (CachedBrokenPage = '') then
     CachedBrokenPage := BuildWebBrokenPage;
+  if (CachedVideoPage = '') then
+    CachedVideoPage := BuildWebVideoPage;
   if (CachedWishesPage = '') then
     CachedWishesPage := BuildWebWishesPage;
 

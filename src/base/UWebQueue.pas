@@ -58,6 +58,7 @@ type
     PlayedToday:boolean;
     Duration:   integer;   // seconds up to the end of the last note, 0 if unknown
     IsDuet:     boolean;
+    HasVideo:   boolean;    // has a video tag, not whether a file is there
     HasMedley:  boolean;    // has medley in/out tags, so it can be sung short
     Path:       UTF8String; // full path of the txt file, used to find the song again
     Cover:      UTF8String; // full path of the cover image, empty if there is none
@@ -133,6 +134,11 @@ type
          away. Both take the lock, so any thread may ask. *}
       procedure CopyBroken(out Songs: TBrokenSongArray);
       function  RemoveBroken(const TxtPath: UTF8String; out Problem: UTF8String): boolean;
+
+      {* The songs whose txt carries no video tag, and writing one in. *}
+      procedure CopyVideoless(out Songs: TWebSongArray);
+      function  AddVideoTag(const TxtPath, VideoFile: UTF8String;
+                            out Problem: UTF8String): boolean;
 
       {* Main thread, once per frame: hands over the names the page asked for
          and takes a snapshot of the players for it to show. *}
@@ -1068,6 +1074,7 @@ begin
     NewIndex[Count].HasMedley  := (CurSong.Medley.Source >= msTag);
     NewIndex[Count].Path       := FullPath;
     NewIndex[Count].Cover      := CoverPath;
+    NewIndex[Count].HasVideo   := (CurSong.Video <> nil) and CurSong.Video.IsSet;
     NewIndex[Count].SearchText := CurSong.ArtistASCII + ' ' + CurSong.TitleASCII + ' ' +
                                   CurSong.LanguageASCII + ' ' + CurSong.EditionASCII + ' ' +
                                   CurSong.GenreASCII + ' ' + IntToStr(CurSong.Year);
@@ -1112,6 +1119,120 @@ begin
   for I := 0 to SongPaths.Count - 1 do
     if ((SongPaths[I] as IPath).AppendPathDelim.ToNative = Folder) then
       Result := true;
+end;
+
+procedure TWebQueue.CopyVideoless(out Songs: TWebSongArray);
+var
+  I, Count: integer;
+begin
+  EnterCriticalSection(Lock);
+  try
+    SetLength(Songs, Length(SongIndex));
+    Count := 0;
+    for I := 0 to High(SongIndex) do
+      if not SongIndex[I].HasVideo then
+      begin
+        Songs[Count] := SongIndex[I];
+        Inc(Count);
+      end;
+    SetLength(Songs, Count);
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+end;
+
+{* Writes the missing video tag into a song file. The file keeps its own line
+   endings and the tag joins the other headers, so the song reads the same to
+   every other program that touches it. *}
+function TWebQueue.AddVideoTag(const TxtPath, VideoFile: UTF8String;
+                               out Problem: UTF8String): boolean;
+var
+  I, At:  integer;
+  Known:  boolean;
+  Stream: TBinaryFileStream;
+  Text, Eol: RawByteString;
+begin
+  Result  := false;
+  Problem := 'This song is not in the collection';
+
+  Known := false;
+  EnterCriticalSection(Lock);
+  try
+    for I := 0 to High(SongIndex) do
+      if (SongIndex[I].Path = TxtPath) then
+        Known := true;
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+
+  if not Known then
+    Exit;
+
+  // the name comes from a page, so it may name anything at all
+  if (VideoFile = '') or (Pos('/', VideoFile) > 0) or (Pos('\', VideoFile) > 0) then
+  begin
+    Problem := 'That is not a file name';
+    Exit;
+  end;
+
+  if not Path(TxtPath).GetPath.Append(VideoFile).IsFile then
+  begin
+    Problem := 'There is no ' + VideoFile + ' next to the song';
+    Exit;
+  end;
+
+  try
+    Stream := TBinaryFileStream.Create(Path(TxtPath), fmOpenRead);
+    try
+      SetLength(Text, Stream.Size);
+      if (Length(Text) > 0) then
+        Stream.Read(Text[1], Length(Text));
+    finally
+      Stream.Free;
+    end;
+  except
+    Problem := 'The song file could not be read';
+    Exit;
+  end;
+
+  if (Pos('#VIDEO', UpperCase(Text)) > 0) then
+  begin
+    Problem := 'The song already has a video tag';
+    Exit;
+  end;
+
+  Eol := IfThen(Pos(#13#10, Text) > 0, #13#10, #10);
+
+  // past a byte order mark, then down to the first line that is not a header
+  At := 1;
+  if (Copy(Text, 1, 3) = #$EF#$BB#$BF) then
+    At := 4;
+
+  while (At <= Length(Text)) and (Text[At] = '#') do
+  begin
+    I := PosEx(#10, Text, At);
+    if (I = 0) then
+      Break;
+    At := I + 1;
+  end;
+
+  Text := Copy(Text, 1, At - 1) + '#VIDEO:' + VideoFile + Eol +
+          Copy(Text, At, Length(Text));
+
+  try
+    Stream := TBinaryFileStream.Create(Path(TxtPath), fmCreate);
+    try
+      Stream.Write(Text[1], Length(Text));
+    finally
+      Stream.Free;
+    end;
+  except
+    Problem := 'The song file could not be written';
+    Exit;
+  end;
+
+  Problem := '';
+  Result  := true;
 end;
 
 {* Throws away the folder of a song the game refused. Only a path that is on
