@@ -417,6 +417,21 @@ begin
       watch - for three minutes, which is longer than any download here. }
     S.Add('b.textContent="Downloading...";grab(x,b,36);');
     S.Add('}).catch(function(){b.disabled=false;b.textContent="Download";toast("Connection lost");});}');
+    { A refresh reports whatever landed, which need not be the song this
+      button fetched - two downloads can finish together. So look the song up
+      by its own name and queue the one that is both new and the right one. }
+    S.Add('function queueFresh(x,b,ids){');
+    S.Add('fetch("/api/songs?limit=10&q="+encodeURIComponent(x.artist+" "+x.title))');
+    S.Add('.then(function(r){return r.json();}).then(function(d){');
+    S.Add('var hit=null;');
+    S.Add('(d.songs||[]).forEach(function(s){if(!hit&&ids.indexOf(s.id)>=0){hit=s;}});');
+    S.Add('if(!hit&&ids.length===1){hit={id:ids[0],title:x.title};}');
+    S.Add('if(!hit){toast(x.title+" can be sung now");return;}');
+    S.Add('post("/api/queue/add",{id:hit.id,singer:elSinger.value}).then(function(q){');
+    S.Add('if(q.ok){b.textContent="In the queue";loadQueue(true);');
+    S.Add('toast(hit.title+" is in the queue");}');
+    S.Add('else{toast(hit.title+" can be sung now");}});');
+    S.Add('}).catch(function(){toast(x.title+" can be sung now");});}');
     S.Add('function grab(x,b,left){');
     S.Add('post("/api/library/refresh",{}).then(function(){');
     S.Add('var rp=setInterval(function(){');
@@ -427,11 +442,7 @@ begin
     // only the library tells us whether the song is really singable
     S.Add('if(f.added>0){loadSongs(true);b.textContent="In the collection";');
     // whoever waited for a download wants to sing it, not look for it again
-    S.Add('if(f.ids&&f.ids.length&&hasName()){');
-    S.Add('post("/api/queue/add",{id:f.ids[0],singer:elSinger.value}).then(function(q){');
-    S.Add('if(q.ok){b.textContent="In the queue";loadQueue(true);');
-    S.Add('toast(x.title+" is in the queue");}');
-    S.Add('else{toast(x.title+" can be sung now");}});}');
+    S.Add('if(f.ids&&f.ids.length&&hasName()){queueFresh(x,b,f.ids);}');
     S.Add('else{toast(x.title+" can be sung now");}return;}');
     // nothing yet - the download is still running, or it brought a song the
     // game cannot use. Looking again is the only way to tell the two apart.
