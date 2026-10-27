@@ -2079,6 +2079,15 @@ begin
   if (Length(CatSongs.Song) <= 0) then
     Exit;
 
+  { A refresh resorts the whole list, so a button no longer belongs to the song
+    it was made for. Throw them away and start over - SetButtonLength only ever
+    sizes the array while it is still untouched. }
+  for I := 0 to High(Button) do
+    Button[I].Free;
+  SetLength(Button, 0);
+  SetLength(Interactions, 0);
+  ButtonPos := -1;
+
   // set length of button array once instead for every song
   SetButtonLength(Length(CatSongs.Song));
 
@@ -2107,6 +2116,7 @@ begin
       CoverFile := Skin.GetTextureFileName('SongCover');
 
     CoverButton.Texture.Name := CoverFile;
+    Song.CoverTex.Free;   // nil on the first run, the old cover on a refresh
     Song.CoverTex := CoverButton.Texture.Clone();
     CoverButton.Selected := False;
   end;
