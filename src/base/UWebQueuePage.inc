@@ -124,7 +124,7 @@ begin
     S.Add('<button class="mini" id="rescan">Look for new songs</button>');
     S.Add('</div>');
     S.Add('<div class="row" style="margin-bottom:8px">');
-    S.Add('<input id="search" type="search" placeholder="Search artist, title, genre, year..." autocomplete="off">');
+    S.Add('<input id="search" type="search" placeholder="Artist, title, language, edition, genre, year..." autocomplete="off">');
     S.Add('</div>');
     S.Add('<div class="sortbar">');
     S.Add('<select id="sort" aria-label="Sort songs by">');

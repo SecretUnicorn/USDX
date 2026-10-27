@@ -1127,6 +1127,14 @@ begin
   if (Length(Word) < 3) then
     Exit;
 
+  { A year is not a word: 1987 is one edit away from 1986 and 1887, so typo
+    tolerance would answer a year with a decade. }
+  for I := 1 to Length(Word) do
+    if not (Word[I] in ['0'..'9']) then
+      Break
+    else if (I = Length(Word)) then
+      Exit;
+
   Limit := IfThen(Length(Word) <= 6, 1, 2);
 
   Words := TStringList.Create;
