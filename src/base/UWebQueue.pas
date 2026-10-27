@@ -135,8 +135,8 @@ type
       procedure CopyBroken(out Songs: TBrokenSongArray);
       function  RemoveBroken(const TxtPath: UTF8String; out Problem: UTF8String): boolean;
 
-      {* The songs whose txt carries no video tag, and writing one in. *}
-      procedure CopyVideoless(out Songs: TWebSongArray);
+      {* Every song as the page sees it, and writing a video tag into one. *}
+      procedure CopySongs(out Songs: TWebSongArray);
       function  AddVideoTag(const TxtPath, VideoFile: UTF8String;
                             out Problem: UTF8String): boolean;
 
@@ -1121,21 +1121,11 @@ begin
       Result := true;
 end;
 
-procedure TWebQueue.CopyVideoless(out Songs: TWebSongArray);
-var
-  I, Count: integer;
+procedure TWebQueue.CopySongs(out Songs: TWebSongArray);
 begin
   EnterCriticalSection(Lock);
   try
-    SetLength(Songs, Length(SongIndex));
-    Count := 0;
-    for I := 0 to High(SongIndex) do
-      if not SongIndex[I].HasVideo then
-      begin
-        Songs[Count] := SongIndex[I];
-        Inc(Count);
-      end;
-    SetLength(Songs, Count);
+    Songs := Copy(SongIndex, 0, Length(SongIndex));
   finally
     LeaveCriticalSection(Lock);
   end;

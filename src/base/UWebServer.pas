@@ -1156,31 +1156,46 @@ begin
   Result := Pos('#VIDEO', UpperCase(Head)) > 0;
 end;
 
-{* The songs with a video in the folder that the txt does not mention, for
-   the /videos page. *}
+{* For the /videos page: the songs with a video in the folder that the txt
+   does not mention, and the ones that have no video anywhere. One walk over
+   the collection answers both. *}
 function VideolessJson: RawByteString;
 var
-  Songs: TWebSongArray;
-  Video: UTF8String;
-  I:     integer;
+  Songs:      TWebSongArray;
+  Video:      UTF8String;
+  Unused, No: RawByteString;
+  I:          integer;
 begin
-  WebQueue.CopyVideoless(Songs);
+  WebQueue.CopySongs(Songs);
 
-  Result := '';
+  Unused := '';
+  No     := '';
   for I := 0 to High(Songs) do
   begin
     Video := FindFileIn(Songs[I].Path, VideoKinds);
-    if (Video = '') or TxtHasVideoTag(Songs[I].Path) then
+
+    if (Video = '') then
+    begin
+      if (No <> '') then
+        No := No + ',';
+      No := No + '{"artist":"' + JsonEscape(Songs[I].Artist) +
+            '","title":"' + JsonEscape(Songs[I].Title) + '"}';
+      Continue;
+    end;
+
+    // a tag written since the game read the song is only in the file
+    if Songs[I].HasVideo or TxtHasVideoTag(Songs[I].Path) then
       Continue;
 
-    if (Result <> '') then
-      Result := Result + ',';
-    Result := Result + '{"path":"' + JsonEscape(Songs[I].Path) +
+    if (Unused <> '') then
+      Unused := Unused + ',';
+    Unused := Unused + '{"path":"' + JsonEscape(Songs[I].Path) +
               '","artist":"' + JsonEscape(Songs[I].Artist) +
               '","title":"' + JsonEscape(Songs[I].Title) +
               '","video":"' + JsonEscape(Video) + '"}';
   end;
-  Result := '{"songs":[' + Result + ']}';
+
+  Result := '{"songs":[' + Unused + '],"none":[' + No + ']}';
 end;
 
 {* The song files the game refused, for the /broken page. *}

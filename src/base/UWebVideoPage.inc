@@ -38,6 +38,9 @@ begin
     S.Add(':focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px;}');
     S.Add('.empty{color:var(--dim);font-size:14px;line-height:1.5;}');
     S.Add('.hint{color:var(--dim);font-size:13px;line-height:1.5;margin-top:14px;}');
+    S.Add('h2{font-size:13px;text-transform:uppercase;letter-spacing:.09em;');
+    S.Add('color:var(--dim);margin:22px 0 8px;font-weight:600;}');
+    S.Add('#none li{display:block;padding:8px 10px;}');
     S.Add('</style>');
     S.Add('</head><body>');
     S.Add('<header>');
@@ -48,6 +51,8 @@ begin
     S.Add('<button id="all" hidden>Add every tag</button></div>');
     S.Add('<ul id="list"></ul>');
     S.Add('<div class="empty" id="empty" hidden>Nothing to do. Every video in your song folders is named in its txt.</div>');
+    S.Add('<h2 id="nonehead" hidden></h2>');
+    S.Add('<ul id="none"></ul>');
     S.Add('<div class="hint" id="hint" hidden>Adding the tag writes one #VIDEO line into the song file. ');
     S.Add('Press M in the game&rsquo;s main menu to read the songs again, ');
     S.Add('or it happens by itself at the next start.</div>');
@@ -58,6 +63,8 @@ begin
     S.Add('var elEmpty=document.getElementById("empty");');
     S.Add('var elHint=document.getElementById("hint");');
     S.Add('var elAll=document.getElementById("all");');
+    S.Add('var elNone=document.getElementById("none");');
+    S.Add('var elNoneHead=document.getElementById("nonehead");');
     S.Add('var rows=[];');
     S.Add('function fix(x,b,li){');
     S.Add('b.disabled=true;b.textContent="Adding...";');
@@ -99,6 +106,15 @@ begin
     S.Add('elHint.hidden=songs.length===0;');
     S.Add('elAll.hidden=songs.length<2;');
     S.Add('elCount.textContent=songs.length===1?"1 song with an unused video":songs.length+" songs with an unused video";');
+    // nothing to press here, these songs need a video first
+    S.Add('var none=d.none||[];');
+    S.Add('elNone.innerHTML="";');
+    S.Add('none.forEach(function(x){var li=document.createElement("li");');
+    S.Add('var n=document.createElement("div");n.className="song";');
+    S.Add('n.textContent=x.artist+" - "+x.title;');
+    S.Add('li.appendChild(n);elNone.appendChild(li);});');
+    S.Add('elNoneHead.hidden=none.length===0;');
+    S.Add('elNoneHead.textContent=none.length+" songs without any video";');
     S.Add('}).catch(function(){});}');
     S.Add('load();');
     S.Add('</script>');
