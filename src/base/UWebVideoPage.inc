@@ -49,7 +49,8 @@ begin
     S.Add('<ul id="list"></ul>');
     S.Add('<div class="empty" id="empty" hidden>Nothing to do. Every video in your song folders is named in its txt.</div>');
     S.Add('<div class="hint" id="hint" hidden>Adding the tag writes one #VIDEO line into the song file. ');
-    S.Add('The game reads it the next time it starts.</div>');
+    S.Add('Press M in the game&rsquo;s main menu to read the songs again, ');
+    S.Add('or it happens by itself at the next start.</div>');
     S.Add('</main>');
     S.Add('<script>');
     S.Add('var elList=document.getElementById("list");');
