@@ -128,6 +128,7 @@ uses
   ULog,
   UPath,
   UPathUtils,
+  USongs,
   UWebQueue;
 
 const
@@ -166,6 +167,7 @@ const
 var
   CachedPage: RawByteString = '';
   CachedPlayersPage: RawByteString = '';
+  CachedBrokenPage: RawByteString = '';
   CachedWishesPage:  RawByteString = '';
   ActiveClients: longint = 0;
   ThumbLock: TRTLCriticalSection;
@@ -173,6 +175,7 @@ var
 {$I UWebMenu.inc}
 {$I UWebQueuePage.inc}
 {$I UWebPlayersPage.inc}
+{$I UWebBrokenPage.inc}
 {$I UWebWishesPage.inc}
 
 { small helpers }
@@ -1101,6 +1104,50 @@ begin
     Json := '{"status":"None"}';
 end;
 
+{* An audio file lying next to a song the game refused: then only the tag is
+   missing and throwing the folder away would waste a good download. *}
+function FindAudioIn(const TxtPath: UTF8String): UTF8String;
+const
+  Audio = '.mp3 .ogg .m4a .opus .wav .flac .aac .wma ';
+var
+  Search: TSearchRec;
+  Ext:    UTF8String;
+begin
+  Result := '';
+  if (FindFirst(ExtractFilePath(TxtPath) + '*', faAnyFile, Search) = 0) then
+  begin
+    repeat
+      // a name without extension would match the blank between the entries
+      Ext := LowerCase(ExtractFileExt(Search.Name));
+      if ((Search.Attr and faDirectory) = 0) and (Ext <> '') and
+         (Pos(Ext + ' ', Audio) > 0) then
+        Result := Search.Name;
+    until (Result <> '') or (FindNext(Search) <> 0);
+    FindClose(Search);
+  end;
+end;
+
+{* The song files the game refused, for the /broken page. *}
+function BrokenJson: RawByteString;
+var
+  Songs: TBrokenSongArray;
+  I:     integer;
+begin
+  WebQueue.CopyBroken(Songs);
+
+  Result := '';
+  for I := 0 to High(Songs) do
+  begin
+    if (I > 0) then
+      Result := Result + ',';
+    Result := Result + '{"path":"' + JsonEscape(Songs[I].Path) +
+              '","problem":"' + JsonEscape(Songs[I].Problem) +
+              '","audio":"' + JsonEscape(FindAudioIn(Songs[I].Path)) + '"' +
+              IfThen(LooseSongFile(Songs[I].Path), ',"loose":true', '') + '}';
+  end;
+  Result := '{"songs":[' + Result + ']}';
+end;
+
 procedure TWebServerThread.SendPhoto(Sock: longint; ID: cardinal);
 var
   Photo: UTF8String;
@@ -1124,6 +1171,7 @@ var
   Songs: TWebSongArray;
   Total, Offset, Limit, Added: integer;
   Answer: RawByteString;
+  Problem: UTF8String;
 begin
   Target := RequestPath;
   Query  := '';
@@ -1163,6 +1211,29 @@ begin
   if (Method = 'GET') and (Target = '/api/wishes') then
   begin
     SendResponse(Sock, '200 OK', 'text/plain; charset=utf-8', WebQueue.GetWishes);
+    Exit;
+  end;
+
+  // the song folders the game refused, and throwing one away
+  if (Method = 'GET') and (Target = '/broken') then
+  begin
+    SendResponse(Sock, '200 OK', 'text/html; charset=utf-8', CachedBrokenPage);
+    Exit;
+  end;
+
+  if (Method = 'GET') and (Target = '/api/broken') then
+  begin
+    SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', BrokenJson);
+    Exit;
+  end;
+
+  if (Method = 'POST') and (Target = '/api/broken/delete') then
+  begin
+    if WebQueue.RemoveBroken(GetParam(Body, 'path'), Problem) then
+      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8', '{"ok":true}')
+    else
+      SendResponse(Sock, '200 OK', 'application/json; charset=utf-8',
+                   '{"error":"' + JsonEscape(Problem) + '"}');
     Exit;
   end;
 
@@ -1424,6 +1495,8 @@ begin
     CachedPage := BuildWebQueuePage;
   if (CachedPlayersPage = '') then
     CachedPlayersPage := BuildWebPlayersPage;
+  if (CachedBrokenPage = '') then
+    CachedBrokenPage := BuildWebBrokenPage;
   if (CachedWishesPage = '') then
     CachedWishesPage := BuildWebWishesPage;
 

@@ -209,6 +209,9 @@ type
     Mult:       integer;
 
     LastError:  AnsiString;
+    { Why the song did not load, in plain words. LastError is a translation
+      key for the popup, this one is for the broken song list on the web. }
+    LoadProblem: AnsiString;
     function    GetErrorLineNo: integer;
     property    ErrorLineNo: integer read GetErrorLineNo;
     property    MD5: string read GetMD5 write SetMD5; //MD5 Hash of Current Song
@@ -1472,6 +1475,17 @@ begin
       Log.LogError('Title tag missing: ' + FullFileName)
     else //unknown Error
       Log.LogError('File incomplete or not Ultrastar txt (B - '+ inttostr(Done) +'): ' + FullFileName);
+
+    if (Done and 8) = 0 then
+      LoadProblem := 'No BPM tag, or the file contains empty lines'
+    else if (Done and 4) = 0 then
+      LoadProblem := 'No audio: the MP3 tag is missing or names a file that is not there'
+    else if (Done and 2) = 0 then
+      LoadProblem := 'No ARTIST tag'
+    else if (Done and 1) = 0 then
+      LoadProblem := 'No TITLE tag'
+    else
+      LoadProblem := 'Not a complete UltraStar file';
   end
   else
   begin //check medley tags
@@ -1975,6 +1989,7 @@ begin
     SongFile := TMemTextFileStream.Create(FileNamePath, fmOpenRead);
   except
     Log.LogError('Failed to open ' + FileNamePath.ToUTF8(true));
+    LoadProblem := 'The file could not be opened';
     Exit;
   end;
 

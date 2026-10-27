@@ -41,6 +41,7 @@ interface
 uses
   SysUtils,
   Classes,
+  USongs,   // the broken song list is handed through from the loader
   URenderer;
 
 type
@@ -99,6 +100,7 @@ type
     private
       Lock:        TRTLCriticalSection;
       SongIndex:   TWebSongArray;
+      BrokenIndex: TBrokenSongArray;    // song files the game refused, same snapshot
       Durations:   TStringList; // song id -> seconds, so a refresh does not read every file again
       PlayerInfo:  TWebPlayerArray;        // snapshot of the players, written once per frame
       PendingName: array of UTF8String;    // names the page asked for, applied on the main thread
@@ -126,6 +128,11 @@ type
          TCatSongs.Refresh, i.e. whenever the song list changed. *}
       procedure RebuildSongIndex;
       procedure SongPlayed(const Artist, Title: UTF8String);
+
+      {* The song files the game refused, and throwing one of their folders
+         away. Both take the lock, so any thread may ask. *}
+      procedure CopyBroken(out Songs: TBrokenSongArray);
+      function  RemoveBroken(const TxtPath: UTF8String; out Problem: UTF8String): boolean;
 
       {* Main thread, once per frame: hands over the names the page asked for
          and takes a snapshot of the players for it to show. *}
@@ -207,6 +214,11 @@ function  WebQueueEditorVisible: boolean;
 procedure WebQueueEditorKey(Key: integer);
 
 {* Shows/hides the big QR code of the song request address. *}
+{* True when the song file lies directly in a song folder instead of its own:
+   then it shares that folder with every other song and only the file itself
+   may be touched. *}
+function LooseSongFile(const TxtPath: UTF8String): boolean;
+
 procedure ToggleWebQueueQRCode;
 function  WebQueueQRCodeVisible: boolean;
 procedure HideWebQueueQRCode;
@@ -239,7 +251,6 @@ uses
   UScreenSingController,
   UScreenSong,
   USong,
-  USongs,
   UText,
   UWebServer;
 
@@ -1068,11 +1079,127 @@ begin
   EnterCriticalSection(Lock);
   try
     SongIndex   := NewIndex;
+    // the loader thread owns its own list, the web threads read this copy
+    if Assigned(USongs.Songs) then
+      BrokenIndex := Copy(USongs.Songs.Broken, 0, Length(USongs.Songs.Broken));
     fIndexReady := true;
     Inc(fRevision);
   finally
     LeaveCriticalSection(Lock);
   end;
+end;
+
+procedure TWebQueue.CopyBroken(out Songs: TBrokenSongArray);
+begin
+  EnterCriticalSection(Lock);
+  try
+    Songs := Copy(BrokenIndex, 0, Length(BrokenIndex));
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+end;
+
+function LooseSongFile(const TxtPath: UTF8String): boolean;
+var
+  I:      integer;
+  Folder: UTF8String;
+begin
+  Result := false;
+  if (SongPaths = nil) then
+    Exit;
+
+  Folder := Path(TxtPath).GetPath.AppendPathDelim.ToNative;
+  for I := 0 to SongPaths.Count - 1 do
+    if ((SongPaths[I] as IPath).AppendPathDelim.ToNative = Folder) then
+      Result := true;
+end;
+
+{* Throws away the folder of a song the game refused. Only a path that is on
+   the broken list is accepted, and that list is built from the song folders
+   alone, so nothing outside them can be reached from here. *}
+function TWebQueue.RemoveBroken(const TxtPath: UTF8String; out Problem: UTF8String): boolean;
+var
+  I, Failed: integer;
+  Known, Subdir: boolean;
+  Folder: IPath;
+  Search: TSearchRec;
+  Rest:   TBrokenSongArray;
+begin
+  Result  := false;
+  Problem := 'This song is not on the broken list';
+  Known   := false;
+
+  EnterCriticalSection(Lock);
+  try
+    for I := 0 to High(BrokenIndex) do
+      if (BrokenIndex[I].Path = TxtPath) then
+        Known := true;
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+
+  if not Known then
+    Exit;
+
+  Folder := Path(TxtPath).GetPath;
+
+  if LooseSongFile(TxtPath) then
+  begin
+    if not Path(TxtPath).DeleteFile then
+    begin
+      Problem := 'The file could not be deleted';
+      Exit;
+    end;
+  end
+  else
+  begin
+    Failed := 0;
+    Subdir := false;
+
+    if (FindFirst(Folder.Append('*').ToNative, faAnyFile, Search) = 0) then
+    begin
+      repeat
+        if ((Search.Attr and faDirectory) <> 0) then
+        begin
+          // whatever put a folder in here knows more than we do
+          if (Search.Name <> '.') and (Search.Name <> '..') then
+            Subdir := true;
+        end
+        else if (not Folder.Append(Search.Name).DeleteFile) then
+          Inc(Failed);
+      until Subdir or (FindNext(Search) <> 0);
+      FindClose(Search);
+    end;
+
+    if Subdir then
+    begin
+      Problem := 'There is a folder inside, delete this one yourself';
+      Exit;
+    end;
+
+    if (Failed > 0) or (not RemoveDir(Folder.RemovePathDelim.ToNative)) then
+    begin
+      Problem := 'The folder could not be removed';
+      Exit;
+    end;
+  end;
+
+  EnterCriticalSection(Lock);
+  try
+    SetLength(Rest, 0);
+    for I := 0 to High(BrokenIndex) do
+      if (BrokenIndex[I].Path <> TxtPath) then
+      begin
+        SetLength(Rest, Length(Rest) + 1);
+        Rest[High(Rest)] := BrokenIndex[I];
+      end;
+    BrokenIndex := Rest;
+  finally
+    LeaveCriticalSection(Lock);
+  end;
+
+  Problem := '';
+  Result  := true;
 end;
 
 {* Levenshtein distance, stopped as soon as it is clear that it exceeds Limit. *}

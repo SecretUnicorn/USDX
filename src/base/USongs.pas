@@ -82,6 +82,14 @@ type
     Length: string;
   end;
 
+  {* A song file the game refused, kept so the web page can show it and throw
+     the folder away - otherwise it is invisible everywhere. *}
+  TBrokenSong = record
+    Path:    UTF8String;   // the txt file
+    Problem: UTF8String;
+  end;
+  TBrokenSongArray = array of TBrokenSong;
+
   {$IFDEF USE_PSEUDO_THREAD}
   TSongs = class(TPseudoThread)
   {$ELSE}
@@ -105,6 +113,7 @@ type
     procedure Execute; override;
   public
     SongList: TList;            // array of songs
+    Broken:   TBrokenSongArray; // the files that did not load, for the web page
 
     Selected: integer;        // selected song index
     constructor Create();
@@ -314,6 +323,7 @@ begin
       ScreenLoading.RefreshProgress(true);
     end;
 
+    SetLength(Broken, 0);
     SongFiles := CollectSongFiles;
 
     fTotalSongsToLoad := Length(SongFiles);
@@ -389,6 +399,7 @@ begin
         if (Path <> nil) and (FileName <> nil) then
           Known.Add(Path.Append(FileName).ToUTF8());
 
+    SetLength(Broken, 0);
     SongFiles := CollectSongFiles;
     Before := SongList.Count;
 
@@ -519,6 +530,12 @@ begin
   else
   begin
     Log.LogError('AnalyseFile failed for "' + FilePath.ToNative + '".');
+    SetLength(Broken, Length(Broken) + 1);
+    Broken[High(Broken)].Path := FilePath.ToUTF8();
+    if (Song.LoadProblem <> '') then
+      Broken[High(Broken)].Problem := Song.LoadProblem
+    else
+      Broken[High(Broken)].Problem := 'The game could not read this song';
     FreeAndNil(Song);
   end;
 end;
