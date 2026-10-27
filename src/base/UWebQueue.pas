@@ -222,12 +222,12 @@ procedure ToggleWebQueueEditor;
 function  WebQueueEditorVisible: boolean;
 procedure WebQueueEditorKey(Key: integer);
 
-{* Shows/hides the big QR code of the song request address. *}
 {* True when the song file lies directly in a song folder instead of its own:
    then it shares that folder with every other song and only the file itself
    may be touched. *}
 function LooseSongFile(const TxtPath: UTF8String): boolean;
 
+{* Shows/hides the big QR code of the song request address. *}
 procedure ToggleWebQueueQRCode;
 function  WebQueueQRCodeVisible: boolean;
 procedure HideWebQueueQRCode;
@@ -2679,6 +2679,10 @@ begin
   SetFontPos((800 - TextWidth(Line)) / 2, 40);
   PrintText(Line);
 
+  { Printing text switches the depth test back on, and these quads carry no
+    depth of their own, so the song covers behind would win over them. }
+  Renderer.DepthTest := false;
+
   // the code itself, light background first so it stays scannable
   Renderer.DrawQuad(OriginX, OriginY, 0, Size, Size, 1, 1, 1, 1);
 
@@ -2853,6 +2857,8 @@ begin
     begin
       if (I = EditorCursor) then
       begin
+        // the lines above it were text, which left the depth test switched on
+        Renderer.DepthTest := false;
         Renderer.DrawQuad(PanelX + 8, LineY - 2, 0, PanelW - 16, LineHeight, 1, 0.82, 0.2, 0.18);
         SetFontColor(1, 0.9, 0.5, 1);
       end
