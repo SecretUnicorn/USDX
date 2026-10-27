@@ -475,9 +475,11 @@ var
     else
       AvatarPlayerTextures[Index + 1] := NoAvatarTexture[Index + 1];
 
-    // the sing screen copied the pictures when it was built
+    // the sing and score screens copied the pictures when they were built
     if Assigned(screenSingViewRef) then
       screenSingViewRef.AssignAvatarStatics(false);
+    if Assigned(ScreenScore) then
+      ScreenScore.AssignAvatarStatics(false);
   end;
 
 begin
