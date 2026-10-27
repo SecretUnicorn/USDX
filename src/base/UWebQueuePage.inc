@@ -58,7 +58,8 @@ begin
     S.Add('.more{width:100%;margin-top:4px;padding:12px;text-align:center;');
     S.Add('color:var(--dim);font-size:13px;}');
     S.Add('.badge{background:var(--panel2);border-radius:20px;padding:2px 9px;color:var(--text);font-size:12px;}');
-    S.Add('.toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--accent2);color:#04281c;padding:10px 16px;border-radius:20px;font-weight:600;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:20;}');
+    S.Add('.toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--accent2);color:#04281c;padding:10px 16px;border-radius:20px;font-weight:600;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:20;');
+    S.Add('max-width:min(92vw,420px);line-height:1.35;text-align:center;}');
     S.Add('.toast.show{opacity:1;}');
     S.Add('.tag{flex:none;display:inline-block;background:var(--panel2);border-radius:5px;padding:0 5px;margin-left:6px;font-size:11px;color:var(--accent2);vertical-align:1px;}');
     S.Add('.views{display:flex;gap:4px;}');
@@ -172,8 +173,13 @@ begin
     S.Add('elSinger.addEventListener("input",function(){');
     S.Add('try{localStorage.setItem("usdxSinger",elSinger.value);}catch(e){}');
     S.Add('updateNameState();});');
+    S.Add('var toastTimer=null;');
+    // a sentence needs longer than a word, and a new message must not be cut
+    // short by the timer of the one before it
     S.Add('function toast(msg){elToast.textContent=msg;elToast.classList.add("show");');
-    S.Add('setTimeout(function(){elToast.classList.remove("show");},1600);}');
+    S.Add('clearTimeout(toastTimer);');
+    S.Add('toastTimer=setTimeout(function(){elToast.classList.remove("show");},');
+    S.Add('Math.min(9000,2500+msg.length*60));}');
     S.Add('function post(url,data){');
     S.Add('var body=Object.keys(data).map(function(k){return encodeURIComponent(k)+"="+encodeURIComponent(data[k]);}).join("&");');
     S.Add('return fetch(url,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:body})');
@@ -405,31 +411,21 @@ begin
     S.Add('b.disabled=true;b.textContent="Starting...";');
     S.Add('post("/api/usdb/download",{id:x.song_id}).then(function(res){');
     S.Add('if(res.error){b.disabled=false;b.textContent="Download";toast(res.error);return;}');
-    S.Add('b.textContent="Downloading...";');
-    S.Add('var tries=0;');
-    S.Add('var poll=setInterval(function(){');
-    S.Add('tries++;');
-    S.Add('fetch("/api/usdb/status?id="+x.song_id+"&q="+encodeURIComponent(query))');
-    S.Add('.then(function(r){return r.json();})');
-    S.Add('.then(function(d){');
-    S.Add('if(d.error){clearInterval(poll);b.disabled=false;b.textContent="Download";');
-    S.Add('toast(d.error);return;}');
-    S.Add('var st=(d.status||"").toLowerCase();');
-    S.Add('if(st.indexOf("fail")>=0){clearInterval(poll);b.disabled=false;');
-    S.Add('b.textContent="Download";toast("The download failed");return;}');
-    S.Add('if(st.indexOf("synchron")<0&&st.indexOf("outdated")<0&&tries<180){return;}');
-    S.Add('clearInterval(poll);b.textContent="Adding...";grab(x,b,3);');
-    S.Add('});},3000);');
+    { The Syncer takes the download button away the moment it starts, so its
+      song list cannot tell a running download from a finished one. Only the
+      collection knows when the song is really there, so that is what we
+      watch - for three minutes, which is longer than any download here. }
+    S.Add('b.textContent="Downloading...";grab(x,b,36);');
     S.Add('}).catch(function(){b.disabled=false;b.textContent="Download";toast("Connection lost");});}');
     S.Add('function grab(x,b,left){');
     S.Add('post("/api/library/refresh",{}).then(function(){');
     S.Add('var rp=setInterval(function(){');
     S.Add('fetch("/api/library/refresh").then(function(r){return r.json();}).then(function(f){');
     S.Add('if(!f.done){return;}');
-    S.Add('clearInterval(rp);loadSongs(true);');
+    S.Add('clearInterval(rp);');
     // the Syncer calls a download done even when it only got the video, so
     // only the library tells us whether the song is really singable
-    S.Add('if(f.added>0){b.textContent="In the collection";');
+    S.Add('if(f.added>0){loadSongs(true);b.textContent="In the collection";');
     // whoever waited for a download wants to sing it, not look for it again
     S.Add('if(f.ids&&f.ids.length&&hasName()){');
     S.Add('post("/api/queue/add",{id:f.ids[0],singer:elSinger.value}).then(function(q){');
@@ -437,12 +433,11 @@ begin
     S.Add('toast(x.title+" is in the queue");}');
     S.Add('else{toast(x.title+" can be sung now");}});}');
     S.Add('else{toast(x.title+" can be sung now");}return;}');
-    // the Syncer lets go of a song a moment before its last file is written,
-    // so an empty collection right now does not mean the download was useless
-    S.Add('if(left>1){b.textContent="Waiting for the files...";');
-    S.Add('setTimeout(function(){grab(x,b,left-1);},4000);return;}');
+    // nothing yet - the download is still running, or it brought a song the
+    // game cannot use. Looking again is the only way to tell the two apart.
+    S.Add('if(left>1){setTimeout(function(){grab(x,b,left-1);},5000);return;}');
     S.Add('b.disabled=false;b.textContent="Download";');
-    S.Add('toast(x.title+" arrived without audio, the game cannot use it");');
+    S.Add('toast(x.title+" did not arrive in the collection");');
     S.Add('});},1500);});}');
     S.Add('elSearch.addEventListener("input",function(){');
     S.Add('clearTimeout(timer);');
