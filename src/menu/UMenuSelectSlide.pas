@@ -413,6 +413,16 @@ var
   HalfL: integer;
   HalfR: integer;
 
+  { A theme may ask for more lines than the screen has options. Reading past
+    the option list ended the game with a range check error, so the lines that
+    have no option of their own stay empty. }
+  function OptionText(Index: integer): UTF8String;
+  begin
+    Result := '';
+    if (Index >= 0) and (Index <= High(TextOptT)) then
+      Result := AdjustOptionTextToFit(TextOptT[Index]);
+  end;
+
   procedure DoSelection(Sel: cardinal);
   var
     I: integer;
@@ -454,7 +464,7 @@ begin
 
       for SO := Low(TextOpt) to High(TextOpt) do
       begin
-        TextOpt[SO].Text := AdjustOptionTextToFit(TextOptT[SO]);
+        TextOpt[SO].Text := OptionText(SO);
       end;
 
       DoSelection(0);
@@ -470,7 +480,7 @@ begin
 
       for SO := High(TextOpt) downto Low(TextOpt) do
       begin
-        TextOpt[SO].Text := AdjustOptionTextToFit(TextOptT[High(TextOptT) - (Lines - SO - 1)]);
+        TextOpt[SO].Text := OptionText(High(TextOptT) - (Lines - SO - 1));
       end;
       DoSelection(Lines - 1);
     end
@@ -490,7 +500,7 @@ begin
         //Change texts
       	for SO := Low(TextOpt) to High(TextOpt) do
       	begin
-      	  TextOpt[SO].Text := AdjustOptionTextToFit(TextOptT[SO]);
+          TextOpt[SO].Text := OptionText(SO);
       	end;
 
       	DoSelection(Value);
@@ -504,7 +514,7 @@ begin
       	//Change texts
        	for SO := High(TextOpt) downto Low(TextOpt) do
        	begin
-	        TextOpt[SO].Text := AdjustOptionTextToFit(TextOptT[High(TextOptT) - (Lines - SO - 1)]);
+          TextOpt[SO].Text := OptionText(High(TextOptT) - (Lines - SO - 1));
       	end;
 
       	DoSelection (HalfL);
@@ -515,7 +525,7 @@ begin
       	//Change Texts
        	for SO := Low(TextOpt) to High(TextOpt) do
       	begin
-	        TextOpt[SO].Text := AdjustOptionTextToFit(TextOptT[Value - HalfL + SO]);
+          TextOpt[SO].Text := OptionText(Value - HalfL + SO);
       	end;
 
         DoSelection(HalfL);
@@ -611,7 +621,9 @@ begin
         one byte characters }
       repeat
         Dec(Len);
-      until (byte(OptText[Len]) and 128) = 0;
+      // Len = 0 would read before the first character of the string, which
+      // ended the game on themes whose option box is narrower than one letter
+      until (Len <= 0) or ((byte(OptText[Len]) and 128) = 0);
       
       Result := copy(OptText, 1, Len) + '..';
     end;
