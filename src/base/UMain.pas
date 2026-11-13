@@ -580,6 +580,13 @@ begin
 
           // the settings panel swallows every key while it is open, and it
           // opens without the web queue so it can switch the queue back on
+          if (Event.type_ = SDL_TEXTINPUT) and Assigned(WebQueue) and
+             WebQueueSettingsVisible then
+          begin
+            WebQueueSettingsText(UTF8String(Event.text.text));
+            Continue;
+          end;
+
           if (Event.type_ = SDL_KEYDOWN) and Assigned(WebQueue) and
              WebQueueSettingsVisible and
              (Event.key.keysym.sym <> SDLK_PRINTSCREEN) then

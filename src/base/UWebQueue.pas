@@ -232,6 +232,9 @@ function LooseSongFile(const TxtPath: UTF8String): boolean;
 procedure ToggleWebQueueSettings;
 function  WebQueueSettingsVisible: boolean;
 procedure WebQueueSettingsKey(Key: integer);
+{* What was typed, as the keyboard layout produces it: the raw key code would
+   turn a German keyboard's ':' into '.' and its '/' into '7'. *}
+procedure WebQueueSettingsText(const Text: UTF8String);
 
 {* Shows/hides the big QR code of the song request address. *}
 procedure ToggleWebQueueQRCode;
@@ -469,10 +472,21 @@ begin
   end;
 end;
 
+{* SDL only sends the characters of the current keyboard layout while text
+   input is switched on, and the game keeps it off outside of text fields. *}
+procedure UpdateSettingsTextInput;
+begin
+  if SettingsOpen and (TSettingRow(SettingsCursor) in [srAddress, srSyncer, srRelay]) then
+    SDL_StartTextInput
+  else
+    SDL_StopTextInput;
+end;
+
 procedure ToggleWebQueueSettings;
 begin
   SettingsOpen := not SettingsOpen;
   SettingsCursor := 0;
+  UpdateSettingsTextInput;
   if SettingsOpen then
     SettingsRelayWas := Ini.RemoteMicServer
   else
@@ -499,10 +513,9 @@ procedure WebQueueSettingsKey(Key: integer);
 
   procedure EditText(var Value: UTF8String);
   begin
+    // the characters themselves arrive as text input, see WebQueueSettingsText
     if (Key = SDLK_BACKSPACE) then
-      Value := Copy(Value, 1, Length(Value) - 1)
-    else if (Key >= 32) and (Key < 127) then
-      Value := Value + UTF8String(Chr(Key));
+      Value := Copy(Value, 1, Length(Value) - 1);
   end;
 
 var
@@ -520,11 +533,13 @@ begin
     SDLK_UP:
       begin
         SettingsCursor := (SettingsCursor + SettingRowCount - 1) mod SettingRowCount;
+        UpdateSettingsTextInput;
         Exit;
       end;
     SDLK_DOWN, SDLK_TAB:
       begin
         SettingsCursor := (SettingsCursor + 1) mod SettingRowCount;
+        UpdateSettingsTextInput;
         Exit;
       end;
   end;
@@ -561,6 +576,18 @@ begin
     srAddress: EditText(Ini.WebQueueAddress);
     srSyncer:  EditText(Ini.WebQueueSyncer);
     srRelay: EditText(Ini.RemoteMicServer);
+  end;
+end;
+
+procedure WebQueueSettingsText(const Text: UTF8String);
+begin
+  if (not SettingsOpen) or (Text = '') then
+    Exit;
+
+  case TSettingRow(SettingsCursor) of
+    srAddress: Ini.WebQueueAddress := Ini.WebQueueAddress + Text;
+    srSyncer:  Ini.WebQueueSyncer := Ini.WebQueueSyncer + Text;
+    srRelay:   Ini.RemoteMicServer := Ini.RemoteMicServer + Text;
   end;
 end;
 
