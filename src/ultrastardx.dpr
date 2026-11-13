@@ -217,6 +217,7 @@ uses
   UBeatTimer        in 'base\UBeatTimer.pas',
   UQRCode           in 'base\UQRCode.pas',
   UWebQueue         in 'base\UWebQueue.pas',
+  UPhoneAudio       in 'base\UPhoneAudio.pas',
   UWebServer        in 'base\UWebServer.pas',
 
   UText             in 'base\UText.pas',

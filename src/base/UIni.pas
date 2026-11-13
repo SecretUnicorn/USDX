@@ -240,6 +240,11 @@ type
       WebQueueAddress: UTF8String; // host shown in-game, empty: detect it
       WebQueueSyncer:  UTF8String; // USDB Syncer web server, empty: no USDB search
 
+      // remote microphone: a phone sings into player 1 through a relay
+      RemoteMic:       integer;
+      RemoteMicServer: UTF8String; // relay, empty: wss://usdx.at/ws/host
+      RemoteMicLibrary: UTF8String; // transport library, empty: next to the game
+
       // WebCam
       WebCamID:         integer;
       WebcamResolution: integer;
@@ -478,6 +483,7 @@ const
 
   // Web song request queue
   IWebQueue:        array[0..1] of UTF8String = ('Off', 'On');
+  IRemoteMic:       array[0..1] of UTF8String = ('Off', 'On');
   IWebQueueOverlay: array[0..1] of UTF8String = ('Off', 'On');
   IWebQueuePortDefault = 8080;
 
@@ -1767,6 +1773,10 @@ begin
   WebQueueAddress := Trim(IniFile.ReadString('WebQueue', 'Address', ''));
   WebQueueSyncer  := Trim(IniFile.ReadString('WebQueue', 'Syncer', ''));
 
+  RemoteMic := ReadArrayIndex(IRemoteMic, IniFile, 'Remote', 'Microphone', IGNORE_INDEX, 'Off');
+  RemoteMicServer := Trim(IniFile.ReadString('Remote', 'Server', ''));
+  RemoteMicLibrary := Trim(IniFile.ReadString('Remote', 'Library', ''));
+
   // WebCam
   WebCamID := IniFile.ReadInteger('Webcam', 'ID', 0);
   WebCamResolution := ReadArrayIndex(IWebcamResolution, IniFile, 'Webcam', 'Resolution', IGNORE_INDEX, '320x240');
@@ -2090,6 +2100,10 @@ begin
     IniFile.WriteInteger('WebQueue', 'Port', WebQueuePort);
     IniFile.WriteString('WebQueue', 'Address', WebQueueAddress);
     IniFile.WriteString('WebQueue', 'Syncer', WebQueueSyncer);
+
+    IniFile.WriteString('Remote', 'Microphone', IRemoteMic[RemoteMic]);
+    IniFile.WriteString('Remote', 'Server', RemoteMicServer);
+    IniFile.WriteString('Remote', 'Library', RemoteMicLibrary);
 
     // Directories (add a template if section is missing)
     // Note: Value must be ' ' and not '', otherwise no key is generated on Linux

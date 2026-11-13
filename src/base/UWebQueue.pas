@@ -251,6 +251,7 @@ uses
   UParty,
   UPath,
   UPathUtils,
+  UPhoneAudio,
   UPlatform,
   UPlaylist,
   UQRCode,
@@ -2705,6 +2706,26 @@ begin
   Line := Language.Translate('WEBQUEUE_QR_HINT');
   SetFontPos((800 - TextWidth(Line)) / 2, OriginY + Size + 46);
   PrintText(Line);
+
+  // the phone microphone needs its own code, and this is the screen people hold
+  // their phone up to anyway
+  if (Ini.RemoteMic = 1) then
+  begin
+    if (PhoneAudio.RoomCode <> '') then
+    begin
+      SetFontColor(0.35, 0.85, 0.63, 1);
+      Line := Format(Language.Translate('REMOTEMIC_CODE'),
+        [string(PhoneAudio.RoomCode), string(RelayHostName(Ini.RemoteMicServer))]);
+    end
+    else
+    begin
+      SetFontColor(1, 0.6, 0.4, 1);
+      Line := Format(Language.Translate('REMOTEMIC_STATE'),
+        [string(PhoneAudio.StateText)]);
+    end;
+    SetFontPos((800 - TextWidth(Line)) / 2, OriginY + Size + 70);
+    PrintText(Line);
+  end;
 
   Renderer.DepthTest := true;
 end;

@@ -74,3 +74,9 @@ ppaslink.sh
 /usdx-dlls-i686.zip
 /game/*.dll
 /game/*.debug
+
+# remote microphone transport, built by tools/build-phone-audio.sh
+/build/
+/game/libusce-phone-audio.dylib
+/game/libusce-phone-audio.so
+/game/usce-phone-audio.dll

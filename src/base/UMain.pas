@@ -103,7 +103,8 @@ uses
   UTime,
   UWebcam,
   UWebQueue,
-  UWebServer;
+  UWebServer,
+  UPhoneAudio;
   //UVideoAcinerella;
 
 procedure Main;
@@ -222,6 +223,16 @@ begin
       WebServer.Start(Ini.WebQueuePort);
     end;
 
+    // Remote microphone through the relay
+    if Ini.RemoteMic = 1 then
+    begin
+      Log.LogStatus('Remote Microphone', 'Initialization');
+      if PhoneAudio.Start(Ini.RemoteMicServer, Ini.RemoteMicLibrary) then
+        Log.LogStatus('Relay connected, waiting for a phone', 'Remote Microphone')
+      else
+        Log.LogWarn(PhoneAudio.LastError, 'Remote Microphone');
+    end;
+
     // GoldenStarsTwinkleMod
     Log.LogStatus('Effect Manager', 'Initialization');
     GoldenRec := TEffectManager.Create;
@@ -274,6 +285,8 @@ begin
     // TODO:
     // call an uninitialize routine for every initialize step
     // or at least use the corresponding Free methods
+
+    PhoneAudio.Stop;
 
     Log.LogStatus('Stopping Web Queue Server', 'Finalization');
     FreeAndNil(WebServer);
@@ -340,6 +353,9 @@ begin
 
       // keyboard/mouse/joystick events
       CheckEvents;
+
+      // samples a phone sent through the relay
+      UpdatePhoneAudio;
 
       // display
       Done := not Display.Draw;

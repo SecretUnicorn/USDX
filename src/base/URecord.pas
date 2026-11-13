@@ -68,7 +68,7 @@ type
       function GetToneString: string; // converts a tone to its string representation;
 
       procedure BoostBuffer(Buffer: PByteArray; Size: integer);
-      procedure ProcessNewBuffer(Buffer: PByteArray; BufferSize: integer);
+      procedure ProcessNewBuffer(Buffer: PByteArray; BufferSize: integer; ApplyBoost: boolean = true);
 
       procedure StartCapture(Format: TAudioFormatInfo);
       procedure StopCapture();
@@ -88,6 +88,10 @@ type
 
       // pitch detection
       // TODO: remove ToneValid, set Tone/ToneAbs=-1 if invalid instead
+      // set while a phone feeds this buffer, so a local microphone assigned to
+      // the same player does not write into it at the same time
+      PhoneOwned: boolean;
+
       ToneValid: boolean;    // true if Tone contains a valid value (otherwise it contains noise)
       Tone:      integer;    // tone relative to one octave (e.g. C2=C3=C4). Range: 0-11
       ToneAbs:   integer;    // absolute (full range) tone (e.g. C2<>C3). Range: 0..NumHalftones-1
@@ -97,6 +101,10 @@ type
       destructor Destroy; override;
 
       procedure Clear;
+
+      // Hands over samples that came in from a phone instead of a sound card.
+      // Pass Count = 0 to only claim the buffer for the phone.
+      procedure SubmitPhonePcm(Samples: pointer; Count: integer);
 
       // use to analyze sound from buffers to get new pitch
       procedure AnalyzeBuffer;
@@ -211,17 +219,62 @@ type
   PSmallIntArray = ^TSmallIntArray;
 
   function AudioInputProcessor(): TAudioInputProcessor;
+  // Moves the samples a phone has sent into player 1's buffer. Called once per
+  // frame; cheap and silent while no remote microphone is connected.
+  procedure UpdatePhoneAudio;
 
 implementation
 
 uses
   ULog,
+  UPhoneAudio,
   UNote;
 
 var
   singleton_AudioInputProcessor : TAudioInputProcessor = nil;
+  PhoneWasLive: boolean = false;
+  PhoneLastSamples: cardinal = 0;
+  PhoneLastCode: UTF8String = '';
 
 { Global }
+
+procedure UpdatePhoneAudio;
+var
+  // 100 ms at 48 kHz, more than the relay ever hands over in one frame
+  Samples: array[0..4799] of smallint;
+  Count: integer;
+  Buffer: TCaptureBuffer;
+  Code: UTF8String;
+begin
+  if not PhoneAudio.Enabled then
+    Exit;
+  if Length(AudioInputProcessor.Sound) = 0 then
+    Exit;
+
+  // the code is the only thing a phone needs, so say it once in the log too
+  Code := PhoneAudio.RoomCode;
+  if (Code <> '') and (Code <> PhoneLastCode) then
+  begin
+    PhoneLastCode := Code;
+    Log.LogStatus('Room code ' + Code + ' on ' +
+      RelayHostName(Ini.RemoteMicServer), 'Remote Microphone');
+  end;
+
+  Buffer := AudioInputProcessor.Sound[0];
+  Count := PhoneAudio.Poll(@Samples[0], Length(Samples));
+  if Count > 0 then
+  begin
+    Buffer.SubmitPhonePcm(@Samples[0], Count);
+    PhoneLastSamples := SDL_GetTicks;
+    PhoneWasLive := true;
+  end
+  else if PhoneWasLive and (SDL_GetTicks - PhoneLastSamples > 250) then
+  begin
+    // the phone went quiet or away: stop showing its last tone forever
+    Buffer.Clear;
+    PhoneWasLive := false;
+  end;
+end;
 
 function AudioInputProcessor(): TAudioInputProcessor;
 begin
@@ -307,14 +360,15 @@ begin
   UnlockAnalysisBuffer();
 end;
 
-procedure TCaptureBuffer.ProcessNewBuffer(Buffer: PByteArray; BufferSize: integer);
+procedure TCaptureBuffer.ProcessNewBuffer(Buffer: PByteArray; BufferSize: integer; ApplyBoost: boolean);
 var
   BufferOffset: integer;
   SampleCount:  integer;
   i:            integer;
 begin
   // apply software boost
-  BoostBuffer(Buffer, BufferSize);
+  if ApplyBoost then
+    BoostBuffer(Buffer, BufferSize);
 
   // voice passthrough (send data to playback-device)
   if (assigned(fVoiceStream)) then
@@ -587,6 +641,31 @@ begin
   end;
 end;
 
+{* Phone PCM is always 16 bit mono at 48 kHz, whatever the sound card uses, so
+   the buffer is reformatted on the first packet. The microphone boost and the
+   voice passthrough stay off: the phone has its own gain, and playing a phone
+   that is a network away through the speakers only echoes. *}
+procedure TCaptureBuffer.SubmitPhonePcm(Samples: pointer; Count: integer);
+begin
+  if (Count < 0) or ((Count > 0) and (Samples = nil)) then
+    Exit;
+
+  if (fAudioFormat = nil) or (fAudioFormat.SampleRate <> 48000) or
+    (fAudioFormat.Format <> asfS16) or (fAudioFormat.Channels <> 1) then
+  begin
+    StopCapture;
+    FreeAndNil(fAudioFormat);
+    fAudioFormat := TAudioFormatInfo.Create(1, 48000, asfS16);
+    Clear;
+  end;
+
+  PhoneOwned := true;
+  // a phone is a network away: hearing it through the speakers is only an echo
+  FreeAndNil(fVoiceStream);
+  if Count > 0 then
+    ProcessNewBuffer(PByteArray(Samples), Count * SizeOf(smallint), false);
+end;
+
 procedure TCaptureBuffer.StartCapture(Format: TAudioFormatInfo);
 begin
   // free old audio-format info
@@ -783,6 +862,10 @@ begin
     end;
   end;
 
+  // a phone that sings into player 1 is a microphone as far as this check goes
+  if (Ini.RemoteMic = 1) and (Length(PlayerState) > 0) then
+    PlayerState[0] := true;
+
   Result := 0;
   for I := 0 to High(PlayerState) do
   begin
@@ -847,7 +930,7 @@ begin
     begin
       CaptureChannel := InputDevice.CaptureChannel[ChannelIndex];
       // check if a capture buffer was assigned, otherwise there is nothing to do
-      if (CaptureChannel <> nil) then
+      if (CaptureChannel <> nil) and (not CaptureChannel.PhoneOwned) then
       begin
         // Use pointer arithmetic instead of open-array indexing to avoid range
         // checks on bogus channel layouts reported by some devices.
