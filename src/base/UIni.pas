@@ -169,6 +169,8 @@ type
       FullScreen:     integer;
       TextureSize:    integer;
       Oscilloscope:   integer;
+      PitchIndicator: integer;
+      SungPitchLine:  integer;
       // not used
       //Spectrum:       integer;
       //Spectrograph:   integer;
@@ -1620,6 +1622,10 @@ begin
   // Oscilloscope
   Oscilloscope := ReadArrayIndex(IOscilloscope, IniFile, 'Graphics', 'Oscilloscope', 1);
 
+  // the arrow at the note area and the sung pitch inside the bars, both Off/On
+  PitchIndicator := ReadArrayIndex(IOscilloscope, IniFile, 'Graphics', 'PitchIndicator', 1);
+  SungPitchLine := ReadArrayIndex(IOscilloscope, IniFile, 'Graphics', 'SungPitchLine', 1);
+
   // Spectrum
   //Spectrum := ReadArrayIndex(ISpectrum, IniFile, 'Graphics', 'Spectrum', IGNORE_INDEX, 'Off');
 
@@ -1957,6 +1963,9 @@ begin
 
     // Oscilloscope
     IniFile.WriteString('Graphics', 'Oscilloscope', IOscilloscope[Oscilloscope]);
+
+    IniFile.WriteString('Graphics', 'PitchIndicator', IOscilloscope[PitchIndicator]);
+    IniFile.WriteString('Graphics', 'SungPitchLine', IOscilloscope[SungPitchLine]);
 
     // Spectrum
     //IniFile.WriteString('Graphics', 'Spectrum', ISpectrum[Spectrum]);

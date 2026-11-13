@@ -94,6 +94,12 @@ type
     LengthNote:     integer; // number of notes (= Length(Note)?).
     Note:           array of TPlayerNote;
 
+    // The pitch as it was really sung, one entry per beat of the current line.
+    // Note[].Tone is snapped onto the note that was hit, so the distance to it
+    // is only kept here. Beat+1 is stored, which leaves an empty slot at zero.
+    SungBeat:       array[0..255] of integer;
+    SungTone:       array[0..255] of single;
+
     // Scores
     property Score:       real read _Score write SetScore;
     property ScoreLine:   real read _ScoreLine write SetScoreLine;
@@ -354,6 +360,7 @@ begin
       Player[I].LengthNote := 0;
       Player[I].HighNote := -1;
       SetLength(Player[I].Note, 0);
+      FillChar(Player[I].SungBeat, SizeOf(Player[I].SungBeat), 0);
     end;
   end;
 
@@ -550,6 +557,10 @@ begin
 
               while (CurrentSound.Tone - CurrentLineFragment.Tone < -6) do
                 CurrentSound.Tone := CurrentSound.Tone + 12;
+
+              // the octave now matches the note, so this is the comparable pitch
+              CurrentPlayer.SungBeat[ActualBeat and 255] := ActualBeat + 1;
+              CurrentPlayer.SungTone[ActualBeat and 255] := CurrentSound.Tone;
 
               // half size notes patch
               NoteHit := false;

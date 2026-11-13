@@ -50,6 +50,8 @@ procedure SingDrawLyricHelper(CP: integer; Left, LyricsMid: real);
 procedure SingDrawLine(Left, Top, Right: real; Track, PlayerIndex: integer; LineSpacing: integer = 15);
 procedure SingDrawPlayerLine(Left, Top, W: real; Track, PlayerIndex: integer; LineSpacing: integer = 15);
 procedure SingDrawPlayerBGLine(Left, Top, Right: real; Track, PlayerIndex: integer; LineSpacing: integer = 15);
+procedure SingDrawPitchArrow(Left, Top: real; Track, PlayerIndex: integer; LineSpacing: integer = 15);
+procedure SingDrawSungPitch(Left, Top, W: real; Track, PlayerIndex: integer; LineSpacing: integer = 15);
 
 //Draw Editor NoteLines
 procedure EditDrawLine(X, YBaseNote, W, H: real; Track: integer; NumLines: integer = 10);
@@ -711,6 +713,91 @@ begin
 end;
 
 // draw sung notes
+{* Where a tone sits in the note area of the current line. The detector hears
+   one octave only, so a tone is first moved next to the notes on screen. *}
+function SingNoteY(Top, Tone: real; Track: integer; LineSpacing: integer; Fit: boolean): real;
+var
+  Line: PLine;
+  Count, Highest: integer;
+  Middle: real;
+begin
+  Line := @CurrentSong.Tracks[Track].Lines[CurrentSong.Tracks[Track].CurrentLine];
+  if Fit then
+  begin
+    Highest := Line.BaseNote;
+    for Count := 0 to Line.HighNote do
+      if Line.Notes[Count].Tone > Highest then
+        Highest := Line.Notes[Count].Tone;
+    Middle := (Line.BaseNote + Highest) / 2;
+    while (Tone - Middle > 6) do
+      Tone := Tone - 12;
+    while (Tone - Middle < -6) do
+      Tone := Tone + 12;
+  end;
+  Result := Top - (Tone - Line.BaseNote) * LineSpacing / 2;
+end;
+
+procedure SingDrawPitchArrow(Left, Top: real; Track, PlayerIndex: integer; LineSpacing: integer);
+var
+  Sound: TCaptureBuffer;
+  Col: TRGB;
+  X, Y, Size: real;
+begin
+  Sound := AudioInputProcessor.Sound[PlayerIndex];
+  if not Sound.ToneValid then
+    Exit;
+
+  if (Party.bPartyGame) then
+    Col := GetPlayerColor(Ini.TeamColor[PlayerIndex])
+  else
+    Col := GetPlayerColor(Ini.PlayerColor[PlayerIndex]);
+
+  Size := Max(5, LineSpacing * 0.45);
+  Y := SingNoteY(Top, Sound.Tone, Track, LineSpacing, true);
+  X := Max(2, Left - 2 * Size - 4);
+  Renderer.DrawTriangle(X, Y - Size, X, Y + Size, X + 2 * Size, Y, 0,
+    Col.R, Col.G, Col.B, 0.9);
+end;
+
+{* The pitch as it was really sung, drawn through the bars. The bars themselves
+   snap onto the note that was hit, so only this line shows how close it was. *}
+procedure SingDrawSungPitch(Left, Top, W: real; Track, PlayerIndex: integer; LineSpacing: integer);
+var
+  Line: PLine;
+  Beat, FirstBeat, LastBeat, Slot: integer;
+  LineLength, X, Y, LastX, LastY: real;
+  HasLast: boolean;
+begin
+  Line := @CurrentSong.Tracks[Track].Lines[CurrentSong.Tracks[Track].CurrentLine];
+  if (Line.HighNote < 0) or (not Line.HasLength(LineLength)) or (LineLength <= 0) then
+    Exit;
+
+  FirstBeat := Line.Notes[0].StartBeat;
+  LastBeat := Min(LyricsState.CurrentBeatD,
+    Line.Notes[Line.HighNote].StartBeat + Line.Notes[Line.HighNote].Duration);
+  LastX := 0;
+  LastY := 0;
+  HasLast := false;
+
+  for Beat := FirstBeat to LastBeat do
+  begin
+    Slot := Beat and 255;
+    if (Player[PlayerIndex].SungBeat[Slot] <> Beat + 1) then
+    begin
+      // a beat without a tone breaks the line instead of bridging the silence
+      HasLast := false;
+      Continue;
+    end;
+    X := Left + (Beat + 0.5 - FirstBeat) * W / LineLength;
+    Y := SingNoteY(Top, Player[PlayerIndex].SungTone[Slot], Track, LineSpacing, false);
+    if HasLast then
+      Renderer.DrawLine(LastX, LastY, X, Y, 0, 2, 1, 1, 1, 0.8);
+    LastX := X;
+    LastY := Y;
+    HasLast := true;
+  end;
+end;
+
 procedure SingDrawPlayerLine(Left, Top, W: real; Track, PlayerIndex: integer; LineSpacing: integer);
 var
   TempR:      real;
@@ -845,6 +932,11 @@ begin
 
       if (Ini.EffectSing = 1) then
         GoldenRec.GoldenNoteTwinkle(Rec.Top,Rec.Bottom,Rec.Right, PlayerIndex);
+
+      if (Ini.SungPitchLine = 1) then
+        SingDrawSungPitch(Left, Top, W, Track, PlayerIndex, LineSpacing);
+      if (Ini.PitchIndicator = 1) then
+        SingDrawPitchArrow(Left, Top, Track, PlayerIndex, LineSpacing);
     end; // if
   end; // if
 end;
