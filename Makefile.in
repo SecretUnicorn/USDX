@@ -464,6 +464,15 @@ macos-standalone-app: macos-app
 
 	@rm -f $(macos_bundle_path)/MacOS/$(USDX_BIN_NAME)
 	@$(MAKE) -f Makefile.macos-helper
+
+# The remote microphone transport, if it has been built (tools/build-phone-audio.sh).
+	@if test -f $(USDX_GAME_DIR)/libusce-phone-audio.dylib; then \
+		$(INSTALL) $(USDX_GAME_DIR)/libusce-phone-audio.dylib $(macos_bundle_path)/MacOS/; \
+		echo "Included the remote microphone transport."; \
+	else \
+		echo "No remote microphone transport found, the phone microphone will stay off."; \
+	fi
+
 	codesign --force --deep --sign - "./UltraStar Deluxe.app"
 
 
