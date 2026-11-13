@@ -100,6 +100,12 @@ In the game:
 - `Ctrl+E` shows the whole queue full screen and lets you edit it:
   `Up`/`Down` pick an entry, `Left`/`Right` move it, `Del` removes it and `C`
   pressed twice empties the queue.
+- `Ctrl+K` opens the settings that used to need the config file: song requests
+  with their port and address, the queue overlay, the USDB Syncer, the phone
+  microphone with its relay, and the two pitch helpers below. It opens over any
+  screen, also when song requests are switched off. `Up`/`Down` pick a line,
+  `Left`/`Right` change it, letters type into an address, `Esc` writes
+  `config.ini`. Changes take effect at once.
 - `Ctrl+M` turns the queue into a medley: it lists the queued songs, marks the
   ones USDX has medley data for, and `Left`/`Right` pick how many of them to
   sing. `Enter` starts, `Esc` closes. The queue itself is kept.
@@ -172,7 +178,64 @@ follows there.
 Neither this page nor the wish list is protected, so anybody on the network can
 reach them through the menu.
 
-### 5. Measuring the microphone delay
+### 5. A phone as the microphone
+A phone can be player 1's microphone, over the relay at
+[usdx.at](https://usdx.at) that UltraStar Community Edition runs. Nothing is
+installed on the phone and nothing is set up on the network: the game registers
+a room, shows a four letter code, and whoever types that code on the relay page
+sings into the game.
+
+```ini
+  [Remote]
+  Microphone=On
+  Server=
+  Library=
+```
+
+`Server` points at another relay (`wss://host/ws/host`), empty means usdx.at.
+`Library` points at another copy of the transport library, empty means next to
+the game. `Ctrl+K` switches the microphone on and off without the file, and the
+room code is shown there, on the `Ctrl+Q` QR screen and in `Error.log`.
+
+The transport is a native library and is not part of the normal build, because
+it needs CMake, OpenSSL and a download of libdatachannel:
+
+```sh
+  tools/build-phone-audio.sh
+```
+
+It lands next to the game binary and in the macOS bundle. Without it the game
+starts as before and logs one warning while `Microphone=On`.
+
+The phone's audio travels through a server that is not yours - fine for a party,
+but worth knowing. The game sends nothing but the room registration; the
+microphone goes directly from phone to game whenever the two can reach each
+other, and through the relay when they cannot. The phone takes player 1; a local
+microphone assigned to the same player is ignored while a phone is singing.
+
+### 6. Seeing your own pitch
+Two helpers that make a miss readable, both on by default and switchable in
+`Ctrl+K` or in `config.ini` under `[Graphics] PitchIndicator` and
+`SungPitchLine`:
+
+- An arrow left of the note area follows the pitch being sung, also before the
+  first note of a line - useful for finding the right octave.
+- A line through the sung bars keeps the pitch as it was really sung. The bars
+  themselves snap onto the note they hit, so a note sung half a tone off used to
+  look exactly like one sung dead on.
+
+### 7. Themes
+Eight themes are included: Modern and Deluxe as before, plus Candy, Classic,
+Neon, Temptation, Verdure and WorldPartyArgon from the
+[upstream collection](https://github.com/UltraStar-Deluxe/Themes). Pick one in
+*Options -> Themes*; each comes with its own skins.
+
+The older themes were written for much older versions of the game and show it:
+a missing theme section is only a line in `Error.log`, but some screens are
+laid out tighter than they are today. Modern and Deluxe remain the ones that
+follow every change in this fork.
+
+### 8. Measuring the microphone delay
 Wireless speakers add a lot of delay, which makes singing score badly because
 the game hears the music later than it plays it. In *Options -> Game*, `C` plays
 five short clicks and measures how long each one takes to come back through the
@@ -186,7 +249,7 @@ measurement, and redo it whenever you change speakers. Repeated measurements can
 differ by up to about 50 ms because the capture buffer aligns differently each
 time; if the result looks off, run it again.
 
-### 6. Merging the scores of older versions
+### 9. Merging the scores of older versions
 Every version keeps its own settings directory (`UltraStarDeluxe<version>` in
 your user data folder), high scores and statistics included, so after an update
 the statistics tab starts at zero again. `tools/merge-score-dbs.py` merges the
@@ -201,18 +264,18 @@ It merges into the most recently used database, matches songs by artist and
 title and skips scores that are already there, so start the new version once
 before running it, and running it twice does no harm.
 
-### 7. Further documentation
+### 10. Further documentation
 The [documentation](https://usdx.eu/docs/) contains more information on:
 * [Command-line parameters](https://usdx.eu/docs/command-line-parameters/)
 * [Controls](https://usdx.eu/docs/controls/)
 * [Customization](https://usdx.eu/docs/customization/)
 
-### 8. Compiling
+### 11. Compiling
 The game has an Autotools-based buildsystem and can be compiled by running `./autogen.sh && ./configure [--enable-debug] && make`. The executable will be `game/ultrastardx[.exe]`.
 
 For extended information, dependencies, OS-specific notes and configure flags, see [COMPILING.md](COMPILING.md).
 
-### 9. Making a release
+### 12. Making a release
 See [RELEASING.md](RELEASING.md)
 
 Other useful documents for maintainers: [pipeline info](PIPELINE.md).
