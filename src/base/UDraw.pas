@@ -506,11 +506,15 @@ end;
 
 procedure SingDrawOscilloscope(Position: TThemePosition; NrSound: integer);
 var
-  SampleIndex: integer;
+  SampleIndex, PointIndex: integer;
   Sound:       TCaptureBuffer;
   MaxX, MaxY:  real;
   Col: TRGB;
   PointList: TPointList;
+const
+  // One vertex per sample is 4096 of them per player per frame, which costs more
+  // than it shows: the curve is far wider than the window is pixels.
+  SampleIndexStep = 32;
 begin;
   Sound := AudioInputProcessor.Sound[NrSound];
 
@@ -522,12 +526,13 @@ begin;
   MaxX := Position.W-1;
   MaxY := (Position.H-1) / 2;
   Sound.LockAnalysisBuffer();
-  SetLength(PointList, Length(Sound.AnalysisBuffer));
+  SetLength(PointList, (Length(Sound.AnalysisBuffer) + SampleIndexStep - 1) div SampleIndexStep);
 
-  for SampleIndex := 0 to High(Sound.AnalysisBuffer) do
+  for PointIndex := 0 to High(PointList) do
   begin
-    PointList[SampleIndex].X := SampleIndex;
-    PointList[SampleIndex].Y := Sound.AnalysisBuffer[SampleIndex];
+    SampleIndex := PointIndex * SampleIndexStep;
+    PointList[PointIndex].X := SampleIndex;
+    PointList[PointIndex].Y := Sound.AnalysisBuffer[SampleIndex];
   end;
 
   Sound.UnlockAnalysisBuffer();
