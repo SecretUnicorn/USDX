@@ -225,15 +225,17 @@ Two helpers that make a miss readable, both on by default and switchable in
   look exactly like one sung dead on.
 
 ### 7. Themes
-Eight themes are included: Modern and Deluxe as before, plus Candy, Classic,
-Neon, Temptation, Verdure and WorldPartyArgon from the
+Five themes are included: Modern and Deluxe as before, plus **Clarity**, a flat
+dark theme built on Modern, **Neon** and **Classic** from the
 [upstream collection](https://github.com/UltraStar-Deluxe/Themes). Pick one in
 *Options -> Themes*; each comes with its own skins.
 
-The older themes were written for much older versions of the game and show it:
-a missing theme section is only a line in `Error.log`, but some screens are
-laid out tighter than they are today. Modern and Deluxe remain the ones that
-follow every change in this fork.
+The collection has more themes - Candy, Temptation, Verdure, WorldPartyArgon -
+and they do run, but they were drawn for a much older game and look it. Copy a
+folder and its `.ini` into `game/themes` if you want one back.
+
+Modern, Deluxe and Clarity are the ones that follow every change in this fork;
+Clarity inherits from Modern, so it gets them for free.
 
 ### 8. Measuring the microphone delay
 Wireless speakers add a lot of delay, which makes singing score badly because
