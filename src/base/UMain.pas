@@ -578,6 +578,24 @@ begin
             Continue;
           end;
 
+          // the settings panel swallows every key while it is open, and it
+          // opens without the web queue so it can switch the queue back on
+          if (Event.type_ = SDL_KEYDOWN) and Assigned(WebQueue) and
+             WebQueueSettingsVisible and
+             (Event.key.keysym.sym <> SDLK_PRINTSCREEN) then
+          begin
+            WebQueueSettingsKey(Event.key.keysym.sym);
+            Continue;
+          end;
+
+          if (Event.type_ = SDL_KEYDOWN) and Assigned(WebQueue) and
+             (Event.key.keysym.sym = SDLK_K) and
+             ((SDL_GetModState and (KMOD_LCTRL or KMOD_RCTRL)) <> 0) then
+          begin
+            ToggleWebQueueSettings;
+            Continue;
+          end;
+
           // escape closes the QR code overlay instead of leaving the screen
           // that is covered by it
           if (Event.type_ = SDL_KEYDOWN) and WebQueueEnabled and Assigned(WebQueue) and

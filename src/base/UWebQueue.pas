@@ -227,6 +227,12 @@ procedure WebQueueEditorKey(Key: integer);
    may be touched. *}
 function LooseSongFile(const TxtPath: UTF8String): boolean;
 
+{* The settings that used to live in config.ini only: song requests, the
+   phone microphone and the two new pitch helpers. Opens over any screen. *}
+procedure ToggleWebQueueSettings;
+function  WebQueueSettingsVisible: boolean;
+procedure WebQueueSettingsKey(Key: integer);
+
 {* Shows/hides the big QR code of the song request address. *}
 procedure ToggleWebQueueQRCode;
 function  WebQueueQRCodeVisible: boolean;
@@ -302,6 +308,10 @@ var
   QRVisible:       boolean = false;
   QRCode:          TQRCode;
   QRAddress:       string = ''; // address the cached code was built from
+
+  SettingsOpen:    boolean = false;
+  SettingsCursor:  integer = 0;
+  SettingsRelayWas: UTF8String = ''; // relay address when the panel was opened
 
 function WebQueueSongID(const Path: UTF8String): cardinal;
 var
@@ -421,6 +431,136 @@ begin
         else
           EditorConfirmClear := true;
       end;
+  end;
+end;
+
+{ The rows of the settings panel, in the order they are drawn. }
+type
+  TSettingRow = (srRequests, srPort, srAddress, srOverlay, srSyncer,
+                 srPhoneMic, srRelay, srPitchArrow, srPitchLine);
+
+const
+  SettingRowCount = Ord(High(TSettingRow)) + 1;
+
+{* Puts a changed setting to work right away: the two servers are started or
+   stopped, everything else is read where it is used. *}
+procedure ApplySetting(Row: TSettingRow);
+begin
+  case Row of
+    srRequests, srPort:
+      begin
+        if Assigned(WebServer) then
+        begin
+          WebServer.Stop;
+          if (Ini.WebQueue = 1) then
+            WebServer.Start(Ini.WebQueuePort);
+        end;
+      end;
+    srPhoneMic:
+      begin
+        if (Ini.RemoteMic = 1) then
+        begin
+          if not PhoneAudio.Start(Ini.RemoteMicServer, Ini.RemoteMicLibrary) then
+            Log.LogWarn(PhoneAudio.LastError, 'Remote Microphone');
+        end
+        else
+          PhoneAudio.Stop;
+      end;
+  end;
+end;
+
+procedure ToggleWebQueueSettings;
+begin
+  SettingsOpen := not SettingsOpen;
+  SettingsCursor := 0;
+  if SettingsOpen then
+    SettingsRelayWas := Ini.RemoteMicServer
+  else
+  begin
+    // reconnecting on every typed letter would be rude to the relay
+    if (Ini.RemoteMicServer <> SettingsRelayWas) then
+      ApplySetting(srPhoneMic);
+    Ini.Save;
+  end;
+end;
+
+function WebQueueSettingsVisible: boolean;
+begin
+  Result := SettingsOpen;
+end;
+
+procedure WebQueueSettingsKey(Key: integer);
+
+  procedure Toggle(var Value: integer; Row: TSettingRow);
+  begin
+    Value := 1 - Value;
+    ApplySetting(Row);
+  end;
+
+  procedure EditText(var Value: UTF8String);
+  begin
+    if (Key = SDLK_BACKSPACE) then
+      Value := Copy(Value, 1, Length(Value) - 1)
+    else if (Key >= 32) and (Key < 127) then
+      Value := Value + UTF8String(Chr(Key));
+  end;
+
+var
+  Row: TSettingRow;
+begin
+  if not SettingsOpen then
+    Exit;
+
+  case Key of
+    SDLK_ESCAPE, SDLK_RETURN:
+      begin
+        ToggleWebQueueSettings;
+        Exit;
+      end;
+    SDLK_UP:
+      begin
+        SettingsCursor := (SettingsCursor + SettingRowCount - 1) mod SettingRowCount;
+        Exit;
+      end;
+    SDLK_DOWN, SDLK_TAB:
+      begin
+        SettingsCursor := (SettingsCursor + 1) mod SettingRowCount;
+        Exit;
+      end;
+  end;
+
+  Row := TSettingRow(SettingsCursor);
+  case Row of
+    srRequests:
+      if (Key = SDLK_LEFT) or (Key = SDLK_RIGHT) then
+        Toggle(Ini.WebQueue, srRequests);
+    srOverlay:
+      if (Key = SDLK_LEFT) or (Key = SDLK_RIGHT) then
+        Toggle(Ini.WebQueueOverlay, srOverlay);
+    srPhoneMic:
+      if (Key = SDLK_LEFT) or (Key = SDLK_RIGHT) then
+        Toggle(Ini.RemoteMic, srPhoneMic);
+    srPitchArrow:
+      if (Key = SDLK_LEFT) or (Key = SDLK_RIGHT) then
+        Toggle(Ini.PitchIndicator, srPitchArrow);
+    srPitchLine:
+      if (Key = SDLK_LEFT) or (Key = SDLK_RIGHT) then
+        Toggle(Ini.SungPitchLine, srPitchLine);
+    srPort:
+      begin
+        case Key of
+          SDLK_LEFT:     Ini.WebQueuePort := Max(1, Ini.WebQueuePort - 1);
+          SDLK_RIGHT:    Ini.WebQueuePort := Min(65535, Ini.WebQueuePort + 1);
+          SDLK_PAGEDOWN: Ini.WebQueuePort := Max(1, Ini.WebQueuePort - 100);
+          SDLK_PAGEUP:   Ini.WebQueuePort := Min(65535, Ini.WebQueuePort + 100);
+        else
+          Exit;
+        end;
+        ApplySetting(srPort);
+      end;
+    srAddress: EditText(Ini.WebQueueAddress);
+    srSyncer:  EditText(Ini.WebQueueSyncer);
+    srRelay: EditText(Ini.RemoteMicServer);
   end;
 end;
 
@@ -2915,8 +3055,165 @@ begin
   Renderer.DepthTest := true;
 end;
 
+{**
+ * The settings panel: everything that used to need a text editor and a
+ * restart. Values take effect at once, the file is written when it closes.
+ *}
+procedure DrawSettingsPanel;
+var
+  I: integer;
+  PanelX, PanelY, PanelW, PanelH, LineY, ValueX: real;
+  Line, Value: UTF8String;
+
+  function OnOff(Value: integer): UTF8String;
+  begin
+    if Value = 1 then
+      Result := Language.Translate('OPTION_VALUE_ON')
+    else
+      Result := Language.Translate('OPTION_VALUE_OFF');
+  end;
+
+  function OrEmpty(const Text, Fallback: UTF8String): UTF8String;
+  begin
+    Result := Text;
+    if Result = '' then
+      Result := Fallback;
+  end;
+
+const
+  LineHeight = 23;
+  HeaderHeight = 38;
+begin
+  PanelW := 620;
+  PanelH := HeaderHeight + LineHeight * SettingRowCount + 74;
+  PanelX := (800 - PanelW) / 2;
+  PanelY := (600 - PanelH) / 2;
+  ValueX := PanelX + 300;
+
+  Renderer.DepthTest := false;
+  Renderer.DrawQuad(0, 0, 0, 800, 600, 0, 0, 0, 0.78);
+  Renderer.DrawQuad(PanelX, PanelY, 0, PanelW, PanelH, 0.07, 0.08, 0.12, 0.97);
+
+  SetFontFamily(0);
+  SetFontStyle(ftRegular);
+  SetFontItalic(false);
+  SetFontReflection(false, 0);
+
+  SetFontSize(21);
+  SetFontColor(1, 0.82, 0.2, 1);
+  SetFontPos(PanelX + 14, PanelY + 7);
+  PrintText(Language.Translate('WEBQUEUE_SETTINGS_TITLE'));
+
+  SetFontSize(16);
+  LineY := PanelY + HeaderHeight;
+
+  for I := 0 to SettingRowCount - 1 do
+  begin
+    case TSettingRow(I) of
+      srRequests:
+        begin
+          Line := Language.Translate('WEBQUEUE_SET_REQUESTS');
+          Value := OnOff(Ini.WebQueue);
+        end;
+      srPort:
+        begin
+          Line := Language.Translate('WEBQUEUE_SET_PORT');
+          Value := IntToStr(Ini.WebQueuePort);
+        end;
+      srAddress:
+        begin
+          Line := Language.Translate('WEBQUEUE_SET_ADDRESS');
+          Value := OrEmpty(Ini.WebQueueAddress,
+            Language.Translate('WEBQUEUE_SET_AUTOMATIC'));
+        end;
+      srOverlay:
+        begin
+          Line := Language.Translate('WEBQUEUE_SET_OVERLAY');
+          Value := OnOff(Ini.WebQueueOverlay);
+        end;
+      srSyncer:
+        begin
+          Line := Language.Translate('WEBQUEUE_SET_SYNCER');
+          Value := OrEmpty(Ini.WebQueueSyncer,
+            Language.Translate('WEBQUEUE_SET_NONE'));
+        end;
+      srPhoneMic:
+        begin
+          Line := Language.Translate('WEBQUEUE_SET_PHONEMIC');
+          Value := OnOff(Ini.RemoteMic);
+        end;
+      srRelay:
+        begin
+          Line := Language.Translate('WEBQUEUE_SET_RELAY');
+          Value := OrEmpty(Ini.RemoteMicServer, 'wss://usdx.at/ws/host');
+        end;
+      srPitchArrow:
+        begin
+          Line := Language.Translate('WEBQUEUE_SET_PITCHARROW');
+          Value := OnOff(Ini.PitchIndicator);
+        end;
+      srPitchLine:
+        begin
+          Line := Language.Translate('WEBQUEUE_SET_PITCHLINE');
+          Value := OnOff(Ini.SungPitchLine);
+        end;
+    end;
+
+    if (I = SettingsCursor) then
+    begin
+      // text was printed before this, which switches the depth test back on
+      Renderer.DepthTest := false;
+      Renderer.DrawQuad(PanelX + 8, LineY - 3, 0, PanelW - 16, LineHeight, 1, 0.82, 0.2, 0.18);
+      SetFontColor(1, 0.9, 0.5, 1);
+    end
+    else
+      SetFontColor(0.85, 0.85, 0.85, 1);
+
+    SetFontPos(PanelX + 16, LineY);
+    PrintText(TruncateToWidth(Line, 270));
+    SetFontPos(ValueX, LineY);
+    PrintText(TruncateToWidth(Value, PanelW - 316));
+
+    LineY := LineY + LineHeight;
+  end;
+
+  // what the settings above are doing right now
+  SetFontSize(14);
+  SetFontColor(0.55, 0.8, 0.95, 1);
+  if (Ini.WebQueue = 1) and (WebServerAddress <> '') then
+    Line := UTF8String(WebServerAddress)
+  else if (Ini.WebQueue = 1) then
+    Line := Language.Translate('WEBQUEUE_OFFLINE') + ' (' + UTF8String(WebServerError) + ')'
+  else
+    Line := '';
+  if (Ini.RemoteMic = 1) then
+  begin
+    if (PhoneAudio.RoomCode <> '') then
+      Line := Line + '   ' + Format(Language.Translate('REMOTEMIC_CODE'),
+        [string(PhoneAudio.RoomCode), string(RelayHostName(Ini.RemoteMicServer))])
+    else
+      Line := Line + '   ' + Format(Language.Translate('REMOTEMIC_STATE'),
+        [string(PhoneAudio.StateText)]);
+  end;
+  SetFontPos(PanelX + 16, LineY + 6);
+  PrintText(TruncateToWidth(Line, PanelW - 32));
+
+  SetFontColor(0.65, 0.65, 0.65, 1);
+  SetFontPos(PanelX + 16, LineY + 28);
+  PrintText(TruncateToWidth(Language.Translate('WEBQUEUE_SETTINGS_HINT'), PanelW - 32));
+
+  Renderer.DepthTest := true;
+end;
+
 procedure DrawWebQueueOverlay;
 begin
+  // the settings panel is also the way back when the queue is switched off
+  if SettingsOpen then
+  begin
+    DrawSettingsPanel;
+    Exit;
+  end;
+
   if (not Assigned(WebQueue)) or (not WebQueueEnabled) then
     Exit;
 
